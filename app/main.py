@@ -1,233 +1,118 @@
-# app/main.py
 from __future__ import annotations
 
 import io
 import logging
-import re
-from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, Depends, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from fastapi.responses import PlainTextResponse
+from fastapi.openapi.docs import get_swagger_ui_html
 
-# --- Optional imports with safe fallbacks ---
-try:
-    from app.config import settings  # type: ignore
-except Exception:
-    class _Settings(BaseModel):
-        APP_NAME: str = "scribbit-backend"
-        ENV: str = "dev"
-        ALLOWED_ORIGINS: list[str] = [
-            "http://localhost",
-            "http://localhost:8000",
-            "https://*.github.dev",
-            "https://*.app.github.dev",
-        ]
-        MODEL_HINT: str = "seed-heuristics"
-    settings = _Settings()  # type: ignore
+from reportlab.lib.pagesizes import LETTER
+from reportlab.pdfgen import canvas
 
-try:
-    from app.version import VERSION  # type: ignore
-except Exception:
-    VERSION = "0.1.0"
+from app.schemas import AnalyzeRequest, AnalyzeResponse
+from app.risk_engine import analyze_terms
 
-try:
-    from app.risk_engine import analyze_terms  # type: ignore
-except Exception as e:
-    def analyze_terms(text: str, model_hint: Optional[str] = None):
-        # Minimal fallback so the app still runs if risk_engine is missing
-        # Return shape must match AnalyzeResponse below.
-        logging.getLogger("analyze").warning(
-            f"risk_engine not available ({e}); using fallback analyzer"
-        )
-        findings = []
-        if "non-refundable" in text.lower():
-            findings.append({
-                "type": "Non-Refundable",
-                "severity": "high",
-                "snippet": "All sales are final and non-refundable.",
-                "explanation": "Non-refundable terms restrict consumer remedies.",
-            })
-        overall_risk = "high" if findings else "low"
-        return {
-            "doc_name": "Untitled",
-            "overall_risk": overall_risk,
-            "findings": findings,
-            "token_usage": 0,
-            "model_used": model_hint or "fallback",
-            "generated_at": datetime.utcnow().isoformat() + "Z",
-        }
+log = logging.getLogger("uvicorn")
+app = FastAPI(title="Scribbit Backend", version="0.1.0")
 
-try:
-    from app.pdf import generate_pdf  # type: ignore
-except Exception as e:
-    def generate_pdf(analysis: dict, doc_name: str, include_explanation: bool = True) -> bytes:
-        # Minimal fallback PDF in case app/pdf.py isn't present
-        buf = io.BytesIO()
-        buf.write(
-            f"Scribbit Scorecard (FALLBACK)\nDoc: {doc_name}\nOverall: {analysis.get('overall_risk','n/a')}\n".encode()
-        )
-        return buf.getvalue()
-
-# --- Pydantic Schemas ---
-class Finding(BaseModel):
-    type: str
-    severity: str
-    snippet: str
-    explanation: Optional[str] = None
-
-class AnalyzeRequest(BaseModel):
-    doc_name: str = Field(..., description="Human-friendly name of the document")
-    text: str = Field(..., description="Full contract or T&C text to analyze")
-
-class AnalyzeResponse(BaseModel):
-    doc_name: str
-    overall_risk: str
-    findings: list[Finding]
-    token_usage: int
-    model_used: str
-    generated_at: str
-
-class ScorecardPDFRequest(AnalyzeRequest):
-    include_explanation: bool = Field(
-        default=True,
-        description="If true, include explanations in the PDF rows"
-    )
-
-# --- App init & logging ---
-logger = logging.getLogger("scribbit")
-analyze_logger = logging.getLogger("analyze")
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
-
-app = FastAPI(
-    title="Scribbit Backend",
-    description="Risk analysis & PDF scorecard generator for T&Cs / contracts.",
-    version=VERSION,
-)
-
-# --- CORS for Codespaces & local ---
-allowed_origins = getattr(settings, "ALLOWED_ORIGINS", [])
+# CORS (adjust as needed)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins if allowed_origins else ["*"],
+    allow_origins=["*"],  # tighten later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- Utils ---
-_slug_rx = re.compile(r"[^a-z0-9\-]+")
 
-def slugify(name: str) -> str:
-    s = name.strip().lower().replace(" ", "-")
-    s = _slug_rx.sub("-", s)
-    s = re.sub(r"-{2,}", "-", s).strip("-")
-    return s or "document"
+@app.get("/", response_class=PlainTextResponse, include_in_schema=False)
+def root() -> str:
+    return "Scribbit API is running. Visit /docs for the Swagger UI."
 
-# --- Routes ---
-@app.get("/", response_class=JSONResponse)
-def root() -> dict:
-    return {
-        "service": getattr(settings, "APP_NAME", "scribbit-backend"),
-        "status": "ok",
-        "version": VERSION,
-        "env": getattr(settings, "ENV", "dev"),
-        "docs": "/docs",
-        "openapi": "/openapi.json",
-        "health": "/health",
-    }
 
-@app.get("/health", response_class=JSONResponse)
-def health() -> dict:
-    return {"status": "ok", "ts": datetime.utcnow().isoformat() + "Z"}
+@app.get("/health", response_class=PlainTextResponse, tags=["System"])
+def health() -> str:
+    return "ok"
 
-@app.get("/version", response_class=JSONResponse)
-def version() -> dict:
-    return {"version": VERSION}
 
-@app.get("/favicon.ico")
-def favicon() -> Response:
-    # We don’t serve one; avoid 404 noise
-    return Response(status_code=204)
-
-@app.post("/analyze", response_model=AnalyzeResponse)
-def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
-    analyze_logger.info(
-        "analyze: doc=%s total=%d tokens=%d model=%s",
-        req.doc_name,
-        len(req.text.split()),
-        0,
-        getattr(settings, "MODEL_HINT", "seed-heuristics"),
+@app.get("/docs", include_in_schema=False)
+def custom_docs():
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title="Scribbit API Docs",
+        swagger_favicon_url=None,  # no favicon
     )
-    result = analyze_terms(req.text, model_hint=getattr(settings, "MODEL_HINT", None))
 
-    # Normalize to AnalyzeResponse (handles dict or already-built object)
-    if isinstance(result, dict):
-        payload = {
-            "doc_name": req.doc_name,
-            "overall_risk": result.get("overall_risk", "unknown"),
-            "findings": result.get("findings", []),
-            "token_usage": int(result.get("token_usage", 0)),
-            "model_used": result.get("model_used", "n/a"),
-            "generated_at": result.get("generated_at", datetime.utcnow().isoformat() + "Z"),
-        }
-    elif isinstance(result, AnalyzeResponse):
-        payload = result.dict()
-        payload["doc_name"] = req.doc_name
-    else:
-        raise HTTPException(status_code=500, detail="Unexpected analyzer return type")
 
-    return AnalyzeResponse(**payload)
+@app.post("/analyze", response_model=AnalyzeResponse, tags=["Analyze"])
+def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
+    res = analyze_terms(req.text, model_hint=req.model_hint)
+    # fill doc_name after the fact so the engine stays pure
+    res.doc_name = req.doc_name
+    log.info("analyze: doc=%s total=%s model=%s", req.doc_name, res.total_risks, res.model_used)
+    return res
 
-@app.post(
-    "/scorecard/pdf",
-    responses={
-        200: {"content": {"application/pdf": {}}},
-        422: {"description": "Validation error"},
-        500: {"description": "Internal server error"},
-    },
-)
-def scorecard_pdf(req: ScorecardPDFRequest):
+
+@app.post("/scorecard/pdf", tags=["Analyze"])
+def scorecard_pdf(req: AnalyzeRequest):
     """
-    Runs analysis, then renders a PDF scorecard and returns it as a download.
+    Returns a generated PDF scorecard (Content-Type: application/pdf)
+    based on the same analysis used by /analyze.
     """
     try:
-        # 1) Run analysis using the same engine
-        analysis = analyze(req)  # returns AnalyzeResponse (pydantic)
+        result = analyze_terms(req.text, model_hint=req.model_hint)
+        result.doc_name = req.doc_name
 
-        # 2) Build PDF — pass a **dict** so pdf builder never expects .get on a model
-        pdf_bytes = generate_pdf(
-            analysis=analysis.dict(),
-            doc_name=req.doc_name,
-            include_explanation=req.include_explanation,
-        )
+        # Generate a simple PDF in-memory
+        buf = io.BytesIO()
+        c = canvas.Canvas(buf, pagesize=LETTER)
+        width, height = LETTER
 
-        if not isinstance(pdf_bytes, (bytes, bytearray)):
-            raise RuntimeError("PDF generator did not return bytes")
+        y = height - 72
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(72, y, f"Scribbit Scorecard — {result.doc_name}")
+        y -= 18
+        c.setFont("Helvetica", 10)
+        c.drawString(72, y, f"Model: {result.model_used} | Total Risks: {result.total_risks}")
+        y -= 14
 
-        filename = f"{slugify(req.doc_name)}-scorecard.pdf"
+        c.drawString(72, y, f"Overall Level: {result.summary.get('risk_level', 'N/A')} (Score={result.summary.get('total_score', 0)})")
+        y -= 20
+
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(72, y, "Findings:")
+        y -= 16
+        c.setFont("Helvetica", 10)
+
+        for idx, r in enumerate(result.risks, start=1):
+            lines = [
+                f"{idx}. [{r.severity}] {r.type} — score {r.score}",
+                f"   Why: {r.rationale}",
+                f"   Snippet: {r.snippet[:200].replace('\\n', ' ')}"  # clamp
+            ]
+            for line in lines:
+                if y < 72:
+                    c.showPage()
+                    y = height - 72
+                    c.setFont("Helvetica", 10)
+                c.drawString(72, y, line)
+                y -= 14
+            y -= 6
+
+        c.showPage()
+        c.save()
+        pdf_bytes = buf.getvalue()
+        buf.close()
 
         headers = {
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Cache-Control": "no-store",
-            "Pragma": "no-cache",
+            "Content-Disposition": f'inline; filename="{req.doc_name.lower().replace(" ", "-")}-scorecard.pdf"'
         }
-        return Response(
-            content=pdf_bytes,
-            media_type="application/pdf",
-            headers=headers,
-        )
-    except HTTPException:
-        # bubble up FastAPI-style exceptions
-        raise
+        return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+    except NotImplementedError as e:
+        raise HTTPException(status_code=501, detail=str(e))
     except Exception as e:
-        logger.exception("scorecard/pdf failed: %s", e)
-        raise HTTPException(
-            status_code=500,
-            detail={"error": str(e), "message": "Internal server error. Please check logs."},
-        )
+        log.exception("PDF generation failed: %s", e)
+        raise HTTPException(status_code=500, detail={"error": str(e), "message": "Internal server error. Please check logs."})
