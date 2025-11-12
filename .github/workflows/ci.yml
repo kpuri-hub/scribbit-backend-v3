@@ -1,19 +1,14 @@
 name: CI
-
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
+  push: { branches: [ main ] }
+  pull_request: { branches: [ main ] }
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+        with: { python-version: '3.11' }
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
@@ -22,13 +17,7 @@ jobs:
         run: |
           python - <<'PY'
           import importlib
-          import sys
-          try:
-              importlib.import_module('fastapi')
-              importlib.import_module('uvicorn')
-              importlib.import_module('pydantic')
-          except Exception as e:
-              print('Smoke test failed:', e)
-              sys.exit(1)
+          for m in ('fastapi','uvicorn','pydantic'):
+              importlib.import_module(m)
           print('Deps OK')
           PY
