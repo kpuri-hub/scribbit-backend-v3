@@ -1,102 +1,67 @@
-from __future__ import annotations
-
-import logging
-from fastapi import FastAPI, HTTPException, Response, Body
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse
 
-from app.config import settings
-from app.models import AnalyzeRequest, AnalyzeResponse
-from app.risk_engine import analyze_terms
-from app.utils import fetch_url_text
-from app.pdf_report import build_pdf
+from app.routes.version import router as version_router
+from app.routes.health import router as health_router
+from app.routes.analyze import router as analyze_router
+from app.routes.scorecard import router as scorecard_router
 
-# ------------------------------------------------------------------------------
-# App + Logging
-# ------------------------------------------------------------------------------
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger("scribbit")
+app = FastAPI(
+    title="Scribbit Backend API",
+    description="Backend for Scribbit Fairness Risk Analyzer",
+    version="0.1.0"
+)
 
-app = FastAPI(title=settings.app_name, version="0.4.0")
-
+# -----------------------------------------------------------------------------
+# Middleware
+# -----------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten in prod
+    allow_origins=["*"],  # You can restrict this later (e.g., your frontend domain)
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ------------------------------------------------------------------------------
-# Basic routes
-# ------------------------------------------------------------------------------
-@app.get("/")
-async def root():
-    return {"ok": True, "name": settings.app_name, "env": settings.environment}
+# -----------------------------------------------------------------------------
+# Routers
+# -----------------------------------------------------------------------------
+app.include_router(version_router)
+app.include_router(health_router)
+app.include_router(analyze_router)
+app.include_router(scorecard_router)
 
-@app.get("/health")
-async def health():
-    return {"status": "healthy"}
+# -----------------------------------------------------------------------------
+# Base routes
+# -----------------------------------------------------------------------------
+@app.get("/", tags=["root"])
+def root():
+    """Root endpoint — simple smoke test."""
+    return {"message": "Scribbit backend is running.", "ok": True}
+
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
+    """Avoids 404 spam for favicon requests."""
     return Response(status_code=204)
 
-# ------------------------------------------------------------------------------
-# Analyze
-# ------------------------------------------------------------------------------
-@app.post("/analyze", response_model=AnalyzeResponse)
-async def analyze(payload: AnalyzeRequest):
-    """
-    Analyze T&Cs text (or fetched URL) for six risk categories and return a scorecard.
-    Works even without OPENAI_API_KEY (falls back to seed heuristics).
-    """
-    if not (payload.text or payload.url):
-        raise HTTPException(status_code=400, detail="Provide 'text' or 'url'")
+# -----------------------------------------------------------------------------
+# Exception handling (optional quality-of-life)
+# -----------------------------------------------------------------------------
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": str(exc),
+            "message": "Internal server error. Please check logs."
+        },
+    )
 
-    text = (payload.text or "").strip()
-
-    if payload.url and not text:
-        try:
-            text = await fetch_url_text(str(payload.url))
-        except Exception as e:
-            logger.exception("URL fetch failed")
-            raise HTTPException(status_code=422, detail=f"Failed to fetch URL: {e}")
-
-    if not text:
-        raise HTTPException(status_code=422, detail="No analyzable text found")
-
-    try:
-        resp = analyze_terms(
-            text,
-            doc_name=payload.doc_name,
-            include_explanation=payload.include_explanation,
-        )
-        logger.info(
-            "analyze: doc=%s total=%s tokens=%s model=%s",
-            resp.doc_name,
-            resp.total_risk_score,
-            resp.tokens_used,
-            resp.model,
-        )
-        return resp
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Analysis error")
-        raise HTTPException(status_code=500, detail=f"Analysis error: {e}")
-
-# ------------------------------------------------------------------------------
-# PDF Scorecard
-# ------------------------------------------------------------------------------
-@app.post("/scorecard/pdf")
-async def scorecard_pdf(payload: AnalyzeRequest = Body(...)):
-    """
-    Generate and download a PDF scorecard for the given request.
-    Reuses the /analyze logic to maintain identical behavior.
-    """
-    resp: AnalyzeResponse = await analyze(payload)  # reuse route logic
-    pdf_bytes = build_pdf(resp)
-    filename = f"scribbit-scorecard-{(resp.doc_name or 'document').replace(' ', '_')}.pdf"
-    headers = {"Content-Disposition": f'attachment; filename=\"{filename}\"'}
-    return StreamingResponse(iter([pdf_bytes]), media_type="application/pdf", headers=headers)
+# -----------------------------------------------------------------------------
+# Run message for uvicorn
+# -----------------------------------------------------------------------------
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
