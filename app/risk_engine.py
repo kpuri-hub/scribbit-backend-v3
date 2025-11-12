@@ -244,7 +244,7 @@ Return compact JSON with this schema (no prose, JSON only):
       "confidence": 0-100,
       "evidence": [string],
       "clauses": [string],
-      "explanation": {"\"string\"" if include_explanation else "null"}
+      "explanation": {"string" if include_explanation else "null"}
     }}
   ],
   "detected_language": "en|..."
@@ -261,7 +261,6 @@ Text to analyze (truncate if long):
     cleaned = raw.strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`")
-        # after stripping backticks, there may be 'json\n' prefix
         cleaned = re.sub(r"^\s*json\s*", "", cleaned, flags=re.I)
 
     try:
