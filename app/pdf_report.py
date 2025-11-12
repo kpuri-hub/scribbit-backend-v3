@@ -3,18 +3,22 @@ from reportlab.lib.pagesizes import LETTER
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from app.models import AnalyzeResponse
+from app.models import AnalyzeResponse, RiskItem
 
 def build_pdf(resp: AnalyzeResponse) -> bytes:
     buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=LETTER, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
+    doc = SimpleDocTemplate(
+        buf, pagesize=LETTER, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36
+    )
     styles = getSampleStyleSheet()
     elems = []
 
     title = f"Scribbit Risk Scorecard — {resp.doc_name or 'Document'}"
     elems.append(Paragraph(title, styles["Title"]))
     elems.append(Paragraph(f"Total Risk Score: <b>{resp.total_risk_score}</b> / 100", styles["Heading2"]))
-    elems.append(Paragraph(f"Model: {resp.model} • Tokens: {resp.tokens_used} • Lang: {resp.detected_language}", styles["Normal"]))
+    elems.append(Paragraph(
+        f"Model: {resp.model} • Tokens: {resp.tokens_used} • Language: {resp.detected_language}",
+        styles["Normal"]))
     elems.append(Spacer(1, 12))
 
     data = [["Risk Type","Severity","Score","Confidence","Evidence (first)","Clauses (first)"]]
@@ -25,7 +29,7 @@ def build_pdf(resp: AnalyzeResponse) -> bytes:
             str(r.score),
             f"{r.confidence}%",
             (r.evidence[0] if r.evidence else "—")[:140],
-            (r.clauses[0] if r.clauses else "—")[:80],
+            (r.clauses[0] if r.clauses else "—")[:100],
         ])
 
     tbl = Table(data, repeatRows=1)
@@ -46,7 +50,10 @@ def build_pdf(resp: AnalyzeResponse) -> bytes:
 
     # Detail blocks
     for r in resp.risks:
-        elems.append(Paragraph(f"{r.risk_type} — {r.severity.title()} ({r.score}/100, conf {r.confidence}%)", styles["Heading3"]))
+        elems.append(Paragraph(
+            f"{r.risk_type} — {r.severity.title()} ({r.score}/100, conf {r.confidence}%)",
+            styles["Heading3"]
+        ))
         if r.explanation:
             elems.append(Paragraph(r.explanation, styles["BodyText"]))
         if r.evidence:
