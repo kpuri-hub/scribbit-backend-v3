@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
 # Scribbit Backend Runner
-# -----------------------
 
 set -euo pipefail
 
