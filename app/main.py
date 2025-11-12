@@ -1,118 +1,175 @@
+# app/main.py
 from __future__ import annotations
 
 import io
 import logging
-from typing import Optional
+from typing import List, Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
-from fastapi.openapi.docs import get_swagger_ui_html
+from pydantic import BaseModel, Field
 
+# ---- Optional version import (safe fallback) ---------------------------------
+try:
+    from app.version import VERSION as APP_VERSION  # type: ignore
+except Exception:
+    APP_VERSION = "dev"
+
+# ---- Risk engine import ------------------------------------------------------
+# Must provide: analyze_terms(text: str, doc_name: str | None = None) -> AnalyzeResponse
+try:
+    from app.risk_engine import analyze_terms
+except Exception as e:
+    # If import fails, we still let the app boot so you can hit /health
+    logging.exception("risk_engine import failed: %s", e)
+    analyze_terms = None  # type: ignore
+
+# ---- PDF libs ----------------------------------------------------------------
+# (Make sure reportlab is installed; we use SimpleDocTemplate/Paragraph/ListFlowable)
 from reportlab.lib.pagesizes import LETTER
-from reportlab.pdfgen import canvas
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, ListFlowable, ListItem
 
-from app.schemas import AnalyzeRequest, AnalyzeResponse
-from app.risk_engine import analyze_terms
+# ------------------------------------------------------------------------------
+# Pydantic models
+# ------------------------------------------------------------------------------
+class Issue(BaseModel):
+    type: str
+    severity: str
+    text: str
+    explanation: Optional[str] = None
 
-log = logging.getLogger("uvicorn")
-app = FastAPI(title="Scribbit Backend", version="0.1.0")
+class AnalyzeResponse(BaseModel):
+    doc_name: Optional[str] = None
+    total_clauses: int
+    issues: List[Issue] = Field(default_factory=list)
+    summary: Optional[str] = None
 
-# CORS (adjust as needed)
+class AnalyzeRequest(BaseModel):
+    doc_name: Optional[str] = "Sample T&Cs"
+    text: str = Field(..., min_length=1)
+
+class PdfRequest(BaseModel):
+    doc_name: Optional[str] = "Scorecard"
+    text: str = Field(..., min_length=1)
+    include_explanation: bool = False
+
+# ------------------------------------------------------------------------------
+# App
+# ------------------------------------------------------------------------------
+app = FastAPI(
+    title="Scribbit Backend",
+    version=APP_VERSION,
+    description="Analyze T&Cs for consumer-risk signals and build a scorecard PDF.",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # tighten later
-    allow_credentials=True,
+    allow_origins=["*"],  # tighten before going public
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+logger = logging.getLogger("scribbit")
+logging.basicConfig(level=logging.INFO)
 
-@app.get("/", response_class=PlainTextResponse, include_in_schema=False)
-def root() -> str:
-    return "Scribbit API is running. Visit /docs for the Swagger UI."
+# ------------------------------------------------------------------------------
+# Routes
+# ------------------------------------------------------------------------------
 
+@app.get("/")
+def root():
+    return {
+        "name": "Scribbit Backend",
+        "version": APP_VERSION,
+        "routes": ["/health", "/analyze (POST)", "/scorecard/pdf (POST)"],
+    }
 
-@app.get("/health", response_class=PlainTextResponse, tags=["System"])
-def health() -> str:
-    return "ok"
+@app.get("/health")
+def health():
+    return {"status": "ok", "version": APP_VERSION}
 
+@app.get("/favicon.ico")
+def favicon():
+    # We’re not serving a real icon yet; return 204 so browsers stop nagging.
+    return Response(status_code=204)
 
-@app.get("/docs", include_in_schema=False)
-def custom_docs():
-    return get_swagger_ui_html(
-        openapi_url="/openapi.json",
-        title="Scribbit API Docs",
-        swagger_favicon_url=None,  # no favicon
-    )
+# ---- Analyze -----------------------------------------------------------------
 
+@app.post("/analyze", response_model=AnalyzeResponse)
+def analyze_endpoint(req: AnalyzeRequest):
+    if analyze_terms is None:
+        raise HTTPException(status_code=500, detail="risk_engine not loaded")
 
-@app.post("/analyze", response_model=AnalyzeResponse, tags=["Analyze"])
-def analyze(req: AnalyzeRequest) -> AnalyzeResponse:
-    res = analyze_terms(req.text, model_hint=req.model_hint)
-    # fill doc_name after the fact so the engine stays pure
-    res.doc_name = req.doc_name
-    log.info("analyze: doc=%s total=%s model=%s", req.doc_name, res.total_risks, res.model_used)
-    return res
-
-
-@app.post("/scorecard/pdf", tags=["Analyze"])
-def scorecard_pdf(req: AnalyzeRequest):
-    """
-    Returns a generated PDF scorecard (Content-Type: application/pdf)
-    based on the same analysis used by /analyze.
-    """
+    # Call the engine (no model_hint; you chose option B earlier)
     try:
-        result = analyze_terms(req.text, model_hint=req.model_hint)
-        result.doc_name = req.doc_name
+        result: AnalyzeResponse = analyze_terms(text=req.text, doc_name=req.doc_name)
+    except TypeError as te:
+        # If you still have an older signature, adapt gracefully
+        logger.warning("analyze_terms signature mismatch, retrying without doc_name: %s", te)
+        result = analyze_terms(req.text)  # type: ignore[arg-type]
 
-        # Generate a simple PDF in-memory
-        buf = io.BytesIO()
-        c = canvas.Canvas(buf, pagesize=LETTER)
-        width, height = LETTER
+    # Log safely without f-strings that include braces/backslashes
+    logger.info("analyze: doc=%s total=%s", result.doc_name or "N/A", result.total_clauses)
+    return result
 
-        y = height - 72
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(72, y, f"Scribbit Scorecard — {result.doc_name}")
-        y -= 18
-        c.setFont("Helvetica", 10)
-        c.drawString(72, y, f"Model: {result.model_used} | Total Risks: {result.total_risks}")
-        y -= 14
+# ---- PDF ---------------------------------------------------------------------
 
-        c.drawString(72, y, f"Overall Level: {result.summary.get('risk_level', 'N/A')} (Score={result.summary.get('total_score', 0)})")
-        y -= 20
+@app.post("/scorecard/pdf")
+def scorecard_pdf(req: PdfRequest):
+    if analyze_terms is None:
+        raise HTTPException(status_code=500, detail="risk_engine not loaded")
 
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(72, y, "Findings:")
-        y -= 16
-        c.setFont("Helvetica", 10)
+    try:
+        analysis: AnalyzeResponse = analyze_terms(text=req.text, doc_name=req.doc_name)
+    except TypeError as te:
+        logger.warning("analyze_terms signature mismatch, retrying without doc_name: %s", te)
+        analysis = analyze_terms(req.text)  # type: ignore
 
-        for idx, r in enumerate(result.risks, start=1):
-            lines = [
-                f"{idx}. [{r.severity}] {r.type} — score {r.score}",
-                f"   Why: {r.rationale}",
-                f"   Snippet: {r.snippet[:200].replace('\\n', ' ')}"  # clamp
-            ]
-            for line in lines:
-                if y < 72:
-                    c.showPage()
-                    y = height - 72
-                    c.setFont("Helvetica", 10)
-                c.drawString(72, y, line)
-                y -= 14
-            y -= 6
+    # Build PDF in-memory
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=LETTER)
+    styles = getSampleStyleSheet()
 
-        c.showPage()
-        c.save()
-        pdf_bytes = buf.getvalue()
-        buf.close()
+    story: List = []
+    title = req.doc_name or "Scorecard"
+    story.append(Paragraph(title, styles["Title"]))
+    story.append(Spacer(1, 12))
 
-        headers = {
-            "Content-Disposition": f'inline; filename="{req.doc_name.lower().replace(" ", "-")}-scorecard.pdf"'
-        }
-        return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
-    except NotImplementedError as e:
-        raise HTTPException(status_code=501, detail=str(e))
-    except Exception as e:
-        log.exception("PDF generation failed: %s", e)
-        raise HTTPException(status_code=500, detail={"error": str(e), "message": "Internal server error. Please check logs."})
+    # Summary
+    summary_text = analysis.summary or "Automated analysis summary."
+    story.append(Paragraph(summary_text, styles["BodyText"]))
+    story.append(Spacer(1, 12))
+
+    # Totals
+    totals_line = "Total Clauses: {}&nbsp;&nbsp;&nbsp;Issues Found: {}".format(
+        analysis.total_clauses, len(analysis.issues)
+    )
+    story.append(Paragraph(totals_line, styles["BodyText"]))
+    story.append(Spacer(1, 12))
+
+    # Issues list
+    if analysis.issues:
+        items = []
+        for iss in analysis.issues:
+            if req.include_explanation and iss.explanation:
+                text = "<b>{}</b> [{}] — {}<br/>{}".format(
+                    iss.type, iss.severity.upper(), iss.text, iss.explanation
+                )
+            else:
+                text = "<b>{}</b> [{}] — {}".format(iss.type, iss.severity.upper(), iss.text)
+            items.append(ListItem(Paragraph(text, styles["BodyText"]), leftIndent=12))
+        story.append(ListFlowable(items, bulletType="1"))
+    else:
+        story.append(Paragraph("No material issues detected.", styles["BodyText"]))
+
+    doc.build(story)
+
+    pdf_bytes = buf.getvalue()
+    buf.close()
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'inline; filename="scorecard.pdf"'},
+    )
