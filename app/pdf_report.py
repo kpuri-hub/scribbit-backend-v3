@@ -1,66 +1,145 @@
+# app/pdf.py
 from io import BytesIO
-from reportlab.lib.pagesizes import LETTER
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from app.models import AnalyzeResponse, RiskItem
+from typing import List, Dict, Any
 
-def build_pdf(resp: AnalyzeResponse) -> bytes:
+from reportlab.lib.pagesizes import LETTER
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib import colors
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+)
+from reportlab.lib.units import inch
+
+def _styles():
+    base = getSampleStyleSheet()
+    title = ParagraphStyle(
+        name="Title",
+        parent=base["Heading1"],
+        alignment=TA_LEFT,
+        fontSize=16,
+        spaceAfter=6,
+    )
+    h2 = ParagraphStyle(
+        name="H2",
+        parent=base["Heading2"],
+        spaceBefore=12,
+        spaceAfter=6,
+    )
+    body = ParagraphStyle(
+        name="Body",
+        parent=base["BodyText"],
+        leading=14,
+        spaceAfter=6,
+    )
+    small = ParagraphStyle(
+        name="Small",
+        parent=base["BodyText"],
+        fontSize=9,
+        textColor=colors.grey,
+    )
+    return {"title": title, "h2": h2, "body": body, "small": small}
+
+def build_scorecard_pdf(
+    doc_name: str,
+    overall_score: float,
+    findings: List[Dict[str, Any]],
+    summary: Dict[str, Any],
+) -> bytes:
+    """
+    Creates a simple 1–2 page scorecard:
+      - Title + overall score
+      - Summary table (issues by risk, top flags)
+      - Findings table
+    """
     buf = BytesIO()
     doc = SimpleDocTemplate(
-        buf, pagesize=LETTER, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36
+        buf,
+        pagesize=LETTER,
+        leftMargin=0.75 * inch,
+        rightMargin=0.75 * inch,
+        topMargin=0.75 * inch,
+        bottomMargin=0.75 * inch,
+        title=f"{doc_name} — Scribbit Scorecard",
     )
-    styles = getSampleStyleSheet()
-    elems = []
+    S = _styles()
+    story = []
 
-    title = f"Scribbit Risk Scorecard — {resp.doc_name or 'Document'}"
-    elems.append(Paragraph(title, styles["Title"]))
-    elems.append(Paragraph(f"Total Risk Score: <b>{resp.total_risk_score}</b> / 100", styles["Heading2"]))
-    elems.append(Paragraph(
-        f"Model: {resp.model} • Tokens: {resp.tokens_used} • Language: {resp.detected_language}",
-        styles["Normal"]))
-    elems.append(Spacer(1, 12))
+    # Title
+    story.append(Paragraph(f"Scribbit Fairness Scorecard — {doc_name}", S["title"]))
+    story.append(Paragraph(f"Overall Fairness Score: <b>{overall_score:.1f}/100</b>", S["body"]))
+    story.append(Spacer(1, 8))
 
-    data = [["Risk Type","Severity","Score","Confidence","Evidence (first)","Clauses (first)"]]
-    for r in resp.risks:
-        data.append([
-            r.risk_type,
-            r.severity.title(),
-            str(r.score),
-            f"{r.confidence}%",
-            (r.evidence[0] if r.evidence else "—")[:140],
-            (r.clauses[0] if r.clauses else "—")[:100],
-        ])
+    # Summary section
+    story.append(Paragraph("Summary", S["h2"]))
+    summary_rows = [["Metric", "Value"]]
 
-    tbl = Table(data, repeatRows=1)
-    tbl.setStyle(TableStyle([
-        ("BACKGROUND",(0,0),(-1,0), colors.HexColor("#111827")),
-        ("TEXTCOLOR",(0,0),(-1,0), colors.white),
-        ("FONTNAME",(0,0),(-1,0),"Helvetica-Bold"),
-        ("FONTSIZE",(0,0),(-1,0),10),
-        ("ALIGN",(2,1),(3,-1),"CENTER"),
-        ("GRID",(0,0),(-1,-1),0.25, colors.HexColor("#e5e7eb")),
-        ("ROWBACKGROUNDS",(0,1),(-1,-1), [colors.white, colors.HexColor("#f9fafb")]),
-        ("BOTTOMPADDING",(0,0),(-1,0),8),
-        ("TOPPADDING",(0,1),(-1,-1),4),
-        ("BOTTOMPADDING",(0,1),(-1,-1),4),
-    ]))
-    elems.append(tbl)
-    elems.append(Spacer(1, 12))
+    # include keys if present
+    if "issue_counts" in summary and isinstance(summary["issue_counts"], dict):
+        issues = ", ".join(f"{k}: {v}" for k, v in summary["issue_counts"].items())
+        summary_rows.append(["Issues by Risk", issues or "—"])
+    if "top_flags" in summary and isinstance(summary["top_flags"], list):
+        top_flags_txt = ", ".join(summary["top_flags"]) if summary["top_flags"] else "—"
+        summary_rows.append(["Top Flags", top_flags_txt])
 
-    # Detail blocks
-    for r in resp.risks:
-        elems.append(Paragraph(
-            f"{r.risk_type} — {r.severity.title()} ({r.score}/100, conf {r.confidence}%)",
-            styles["Heading3"]
-        ))
-        if r.explanation:
-            elems.append(Paragraph(r.explanation, styles["BodyText"]))
-        if r.evidence:
-            elems.append(Paragraph("<b>Evidence:</b> " + " | ".join(r.evidence[:3]), styles["BodyText"]))
-        if r.clauses:
-            elems.append(Paragraph("<b>Clauses:</b> " + " | ".join(r.clauses[:3]), styles["BodyText"]))
-        elems.append(Spacer(1, 6))
+    # Fallback if nothing present
+    if len(summary_rows) == 1:
+        summary_rows.append(["Notes", "No summary provided."])
 
-    doc.build(elems)
+    summary_tbl = Table(summary_rows, hAlign="LEFT", colWidths=[2.2 * inch, None])
+    summary_tbl.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f0f0f0")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("BOX", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+            ]
+        )
+    )
+    story.append(summary_tbl)
+    story.append(Spacer(1, 12))
+
+    # Findings table
+    story.append(Paragraph("Detailed Findings", S["h2"]))
+    rows = [["Risk", "Severity", "Excerpt", "Reason"]]
+    for f in findings or []:
+        rows.append(
+            [
+                str(f.get("risk", "—")),
+                str(f.get("severity", "—")),
+                str(f.get("excerpt", "—")),
+                str(f.get("reason", "—")),
+            ]
+        )
+
+    if len(rows) == 1:
+        rows.append(["—", "—", "No findings.", "—"])
+
+    tbl = Table(rows, repeatRows=1, colWidths=[1.2 * inch, 0.9 * inch, None, None])
+    tbl.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8f0fe")),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("BOX", (0, 0), (-1, -1), 0.25, colors.grey),
+            ]
+        )
+    )
+    story.append(tbl)
+
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("Generated by Scribbit.", S["small"]))
+
+    doc.build(story)
     return buf.getvalue()
