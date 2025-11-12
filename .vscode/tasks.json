@@ -1,0 +1,11 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "kill-uvicorn",
+      "type": "shell",
+      "command": "pkill -f 'uvicorn' || true",
+      "problemMatcher": []
+    }
+  ]
+}
