@@ -1,0 +1,5 @@
+{
+  "name": "scribbit-backend",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11-bookworm",
+  "forwardPorts": [8000]
+}
