@@ -1,4 +1,3 @@
-# app/main.py
 from __future__ import annotations
 
 import logging
@@ -99,5 +98,5 @@ async def scorecard_pdf(payload: AnalyzeRequest = Body(...)):
     resp: AnalyzeResponse = await analyze(payload)  # reuse route logic
     pdf_bytes = build_pdf(resp)
     filename = f"scribbit-scorecard-{(resp.doc_name or 'document').replace(' ', '_')}.pdf"
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    headers = {"Content-Disposition": f'attachment; filename=\"{filename}\"'}
     return StreamingResponse(iter([pdf_bytes]), media_type="application/pdf", headers=headers)
