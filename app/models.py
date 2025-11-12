@@ -1,7 +1,14 @@
 from typing import List, Optional, Literal
 from pydantic import BaseModel, HttpUrl, Field
 
-RiskType = Literal["FX","Auto-Renew","Arbitration","Data-Sharing","Non-Refundable","Unilateral Changes"]
+RiskType = Literal[
+    "FX",
+    "Auto-Renew",
+    "Arbitration",
+    "Data-Sharing",
+    "Non-Refundable",
+    "Unilateral Changes"
+]
 
 class AnalyzeRequest(BaseModel):
     text: Optional[str] = None
