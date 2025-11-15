@@ -4,9 +4,15 @@
 // Renders a small, fixed-position panel showing the current risk level
 // and a few key findings. Subscribes to risk updates from the background
 // via ScribbitMessaging.
+//
+// New in this version:
+// - Shows Scribbit icon in the header
+// - Close (X) button to hide the panel
+// - Click header to collapse/expand details
 
 (function () {
   const PANEL_ID = "scribbit-fairness-panel";
+  const PANEL_COLLAPSED_CLASS = "scribbit-panel-collapsed";
 
   function injectStylesheet() {
     try {
@@ -33,10 +39,16 @@
 
     panel.innerHTML = `
       <div class="scribbit-panel-header">
-        <span class="scribbit-panel-title">Scribbit Scan</span>
-        <span class="scribbit-panel-badge scribbit-level-low" id="scribbit-panel-level-badge">LOW</span>
+        <div class="scribbit-panel-header-left">
+          <img class="scribbit-panel-logo" id="scribbit-panel-logo" alt="Scribbit" />
+          <span class="scribbit-panel-title">Scribbit Scan</span>
+        </div>
+        <div class="scribbit-panel-header-right">
+          <span class="scribbit-panel-badge scribbit-level-low" id="scribbit-panel-level-badge">LOW</span>
+          <button class="scribbit-panel-close" id="scribbit-panel-close" title="Hide Scribbit panel">×</button>
+        </div>
       </div>
-      <div class="scribbit-panel-body">
+      <div class="scribbit-panel-body" id="scribbit-panel-body">
         <div class="scribbit-panel-score" id="scribbit-panel-score">Score: 0</div>
         <ul class="scribbit-panel-risks" id="scribbit-panel-risks">
           <li class="scribbit-panel-risk-item scribbit-empty">No issues detected yet.</li>
@@ -45,6 +57,40 @@
     `;
 
     document.body.appendChild(panel);
+
+    // Set logo src via chrome.runtime.getURL so it works from the extension bundle
+    try {
+      const logoEl = panel.querySelector("#scribbit-panel-logo");
+      if (logoEl) {
+        logoEl.src = chrome.runtime.getURL("assets/icons/icon32.png");
+      }
+    } catch (err) {
+      console.warn("[Scribbit] Failed to set panel logo:", err);
+    }
+
+    // Wire close button
+    const closeBtn = panel.querySelector("#scribbit-panel-close");
+    if (closeBtn) {
+      closeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        panel.style.display = "none";
+        // Optional: remember closed state for this page load
+        window.__scribbitPanelClosed = true;
+      });
+    }
+
+    // Toggle collapse/expand when clicking header (except close button)
+    const headerEl = panel.querySelector(".scribbit-panel-header");
+    if (headerEl) {
+      headerEl.addEventListener("click", (e) => {
+        // If the close button was clicked, let its handler run instead
+        if ((e.target && e.target.id === "scribbit-panel-close") || e.target.closest("#scribbit-panel-close")) {
+          return;
+        }
+        panel.classList.toggle(PANEL_COLLAPSED_CLASS);
+      });
+    }
+
     return panel;
   }
 
@@ -125,6 +171,9 @@
   }
 
   function init() {
+    // If user already closed it on this page load, don't recreate
+    if (window.__scribbitPanelClosed) return;
+
     injectStylesheet();
     createPanelElement();
 
