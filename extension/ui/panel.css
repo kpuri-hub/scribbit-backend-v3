@@ -1,5 +1,5 @@
 /* ui/panel.css */
-/* Scribbit Fairness Scanner - On-page Panel Styles */
+/* Scribbit Fairness Scanner – On-page Panel Styles */
 
 #scribbit-fairness-panel {
   position: fixed;
@@ -14,12 +14,15 @@
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
   z-index: 2147483647;
   overflow: hidden;
+  display: none; /* hidden until we detect risks */
 }
 
-/* Collapsed state: show only header */
-#scribbit-fairness-panel.scribbit-panel-collapsed .scribbit-panel-body {
+/* Collapsed state */
+#scribbit-fairness-panel.collapsed .scribbit-panel-body {
   display: none;
 }
+
+/* HEADER ------------------------------------------------------------ */
 
 .scribbit-panel-header {
   display: flex;
@@ -66,20 +69,27 @@
   text-transform: uppercase;
 }
 
-.scribbit-level-low {
-  background: rgba(22, 163, 74, 0.15);
+/* LEVEL COLORS ------------------------------------------------------- */
+
+.scribbit-level-low,
+#scribbit-panel-level.LOW {
+  background: rgba(22, 163, 74, 0.2);
   color: #bbf7d0;
 }
 
-.scribbit-level-medium {
-  background: rgba(234, 179, 8, 0.18);
+.scribbit-level-medium,
+#scribbit-panel-level.MEDIUM {
+  background: rgba(234, 179, 8, 0.2);
   color: #facc15;
 }
 
-.scribbit-level-high {
-  background: rgba(239, 68, 68, 0.2);
+.scribbit-level-high,
+#scribbit-panel-level.HIGH {
+  background: rgba(239, 68, 68, 0.25);
   color: #fecaca;
 }
+
+/* CLOSE BUTTON ------------------------------------------------------- */
 
 .scribbit-panel-close {
   background: transparent;
@@ -94,6 +104,8 @@
 .scribbit-panel-close:hover {
   color: #e5e7eb;
 }
+
+/* BODY --------------------------------------------------------------- */
 
 .scribbit-panel-body {
   padding: 8px 10px 10px;
@@ -125,6 +137,8 @@
   opacity: 0.7;
 }
 
+/* RISK DOT COLORS ---------------------------------------------------- */
+
 .scribbit-risk-label {
   display: flex;
   align-items: center;
@@ -150,7 +164,7 @@
   background: #ef4444;
 }
 
-/* Mute controls */
+/* MUTE CONTROLS ------------------------------------------------------ */
 
 .scribbit-panel-mute-row {
   margin-top: 8px;
@@ -181,13 +195,14 @@
   flex-wrap: wrap;
 }
 
-.scribbit-panel-mute-options-visible {
+.scribbit-panel-mute-options.visible {
   display: flex;
 }
 
-.scribbit-panel-mute-option {
+.scribbit-panel-mute-option,
+.scribbit-panel-mute-options button {
   border: 1px solid rgba(148, 163, 184, 0.5);
-  background: rgba(15, 23, 42, 0.8);
+  background: rgba(15, 23, 42, 0.85);
   color: #e5e7eb;
   border-radius: 999px;
   font-size: 10px;
@@ -195,7 +210,8 @@
   cursor: pointer;
 }
 
-.scribbit-panel-mute-option:hover {
-  background: rgba(37, 99, 235, 0.5);
+.scribbit-panel-mute-option:hover,
+.scribbit-panel-mute-options button:hover {
+  background: rgba(59, 130, 246, 0.5);
   border-color: rgba(59, 130, 246, 0.8);
 }
