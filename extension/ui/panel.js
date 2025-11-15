@@ -7,10 +7,15 @@
 // - Close button
 // - Mute site (1h, 1d, 1w, forever)
 // - Scribbit logo
+// - NEW: Expand once per host, then start collapsed on subsequent loads
 
 (function () {
   const PANEL_ID = "scribbit-fairness-panel";
   const STORAGE_KEY = "scribbitMuteRules";
+
+  // Panel display state per host (expand once, then collapsed for ~30 min)
+  const PANEL_STATE_PREFIX = "scribbitPanelState_";
+  const AUTO_EXPAND_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
 
   const BLOCKED_HOSTS = [
     "google.com",
@@ -31,7 +36,43 @@
   }
 
   /**********************************************************
-   * STORAGE HELPERS
+   * PANEL STATE HELPERS (expand once per host)
+   **********************************************************/
+
+  function getPanelStateKey() {
+    return PANEL_STATE_PREFIX + host;
+  }
+
+  function loadPanelDisplayState(callback) {
+    if (!chrome.storage || !chrome.storage.session) {
+      // No session storage available → treat as "never shown"
+      return callback({ hasShownExpanded: false, lastShownAt: 0 });
+    }
+
+    const key = getPanelStateKey();
+    chrome.storage.session.get([key], (data) => {
+      const val = data?.[key];
+      if (!val) {
+        return callback({ hasShownExpanded: false, lastShownAt: 0 });
+      }
+      callback(val);
+    });
+  }
+
+  function savePanelDisplayState(state) {
+    if (!chrome.storage || !chrome.storage.session) return;
+    const key = getPanelStateKey();
+    chrome.storage.session.set({ [key]: state });
+  }
+
+  function shouldAutoExpand(state) {
+    if (!state || !state.hasShownExpanded) return true;
+    const now = Date.now();
+    return now - state.lastShownAt > AUTO_EXPAND_WINDOW_MS;
+  }
+
+  /**********************************************************
+   * STORAGE HELPERS (mute)
    **********************************************************/
   function isHostMuted(callback) {
     chrome.storage.local.get([STORAGE_KEY], (data) => {
@@ -114,7 +155,7 @@
           </div>
         </div>
       </div>
-    `;
+    ";
 
     document.body.appendChild(panel);
 
@@ -182,6 +223,9 @@
       return;
     }
 
+    // Was the panel hidden before this update? (first time we show it this load)
+    const firstTimeShow = panel.style.display === "none" || panel.style.display === "";
+
     // Show now that we have risks
     panel.style.display = "block";
 
@@ -193,7 +237,7 @@
     levelBadge.textContent = result.overallLevel;
     scoreEl.textContent = `Score: ${result.overallScore}`;
 
-    // Update risks
+    // Update risks (top 3 for now)
     listEl.innerHTML = "";
     result.risks.slice(0, 3).forEach((risk) => {
       const li = document.createElement("li");
@@ -201,6 +245,22 @@
       li.textContent = risk.label;
       listEl.appendChild(li);
     });
+
+    // NEW: On first appearance for this host, decide expanded vs collapsed
+    if (firstTimeShow) {
+      loadPanelDisplayState((state) => {
+        const expand = shouldAutoExpand(state);
+        if (expand) {
+          panel.classList.remove("collapsed");
+          savePanelDisplayState({
+            hasShownExpanded: true,
+            lastShownAt: Date.now()
+          });
+        } else {
+          panel.classList.add("collapsed");
+        }
+      });
+    }
   }
 
   /**********************************************************
