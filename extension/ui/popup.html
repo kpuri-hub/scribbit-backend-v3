@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Scribbit</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+
+<body>
+  <div id="popup-root">
+
+    <header class="popup-header">
+      <img src="../assets/icons/icon32.png" alt="Scribbit Logo" class="popup-logo" />
+      <span class="popup-title">Scribbit Scan</span>
+    </header>
+
+    <div id="risk-container" class="risk-container">
+      <div class="risk-level-badge low" id="risk-level-badge">LOW</div>
+      <div class="risk-score" id="risk-score">Score: 0</div>
+
+      <ul id="risk-list" class="risk-list">
+        <li class="empty">Loading...</li>
+      </ul>
+    </div>
+
+    <footer class="popup-footer">
+      <a href="https://scribbit.co" target="_blank" class="help-link">
+        Learn more
+      </a>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
