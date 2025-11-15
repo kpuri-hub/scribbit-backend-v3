@@ -97,25 +97,73 @@ const ScribbitRules = (() => {
 
   /**
    * Rule 2: Possible DCC / FX confusion (local vs foreign currencies).
-   * This is intentionally simple for now, based on currency symbol mix.
+   *
+   * IMPORTANT: To avoid false positives (like Booking.com showing a currency picker),
+   * this rule now requires BOTH:
+   *  - multiple currencies detected, AND
+   *  - language that looks like DCC / currency conversion behavior.
    */
   const DCC_MIXED_CURRENCY_RULE = {
     id: "dcc_mixed_currency_basic",
-    label: "Multiple currencies detected - possible DCC / FX confusion",
-    description: "Detects when page text includes more than one currency symbol or code.",
+    label: "Possible DCC / FX confusion",
+    description: "Multiple currencies plus language about conversion or card currency.",
     severity: "MEDIUM",
     tags: ["dcc", "fx", "currency"],
 
     evaluate(snapshot) {
+      const text = (snapshot.textNormalized || "").trim();
+      if (!text) return null;
+
       const symbols = snapshot.currencySymbolsDetected || [];
       if (!Array.isArray(symbols) || symbols.length <= 1) return null;
 
-      const distinct = Array.from(new Set(symbols.map((s) => s.toUpperCase())));
+      const distinct = Array.from(new Set(symbols.map((s) => String(s).toUpperCase())));
       if (distinct.length <= 1) return null;
+
+      // DCC-ish phrases we expect to see when there's a real conversion choice
+      const dccPhrases = [
+        "dynamic currency conversion",
+        "dcc",
+        "pay in your currency",
+        "pay in card currency",
+        "pay in your card currency",
+        "you will be charged in",
+        "will be charged in",
+        "charged in your currency",
+        "currency conversion fee",
+        "currency conversion",
+        "conversion fee",
+        "conversion rate",
+        "exchange rate applies",
+        "exchange rate will be",
+        "we convert",
+        "we may convert",
+        "local currency",
+        "card currency",
+        "foreign transaction fee",
+        "fx fee"
+      ];
+
+      const hasDccLanguage = dccPhrases.some((p) => text.includes(p));
+      if (!hasDccLanguage) {
+        // Multiple currencies but no DCC/conversion language:
+        // Likely just a currency selector (e.g. Booking.com homepage) → no risk.
+        return null;
+      }
+
+      const evidenceSnippets = findKeywordEvidence(
+        text,
+        snapshot.textRaw || "",
+        dccPhrases
+      );
 
       const evidence = [
         `Detected currency markers: ${distinct.join(", ")}`
       ];
+
+      if (evidenceSnippets.length) {
+        evidence.push(...evidenceSnippets);
+      }
 
       return {
         ruleId: this.id,
