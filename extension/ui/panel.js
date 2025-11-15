@@ -7,7 +7,7 @@
 // - Close button
 // - Mute site (1h, 1d, 1w, forever)
 // - Scribbit logo
-// - NEW: Expand once per host, then start collapsed on subsequent loads
+// - Expand once per host, then start collapsed on subsequent loads
 
 (function () {
   const PANEL_ID = "scribbit-fairness-panel";
@@ -51,7 +51,7 @@
 
     const key = getPanelStateKey();
     chrome.storage.session.get([key], (data) => {
-      const val = data?.[key];
+      const val = data && data[key];
       if (!val) {
         return callback({ hasShownExpanded: false, lastShownAt: 0 });
       }
@@ -76,7 +76,7 @@
    **********************************************************/
   function isHostMuted(callback) {
     chrome.storage.local.get([STORAGE_KEY], (data) => {
-      const rules = data?.[STORAGE_KEY] || {};
+      const rules = (data && data[STORAGE_KEY]) || {};
       const entry = rules[host];
 
       if (!entry) return callback(false);
@@ -93,7 +93,7 @@
 
   function setHostMute(durationMsOrNull) {
     chrome.storage.local.get([STORAGE_KEY], (data) => {
-      const rules = data?.[STORAGE_KEY] || {};
+      const rules = (data && data[STORAGE_KEY]) || {};
       rules[host] = {
         until: durationMsOrNull === null ? null : Date.now() + durationMsOrNull
       };
@@ -124,38 +124,34 @@
     panel.id = PANEL_ID;
     panel.style.display = "none"; // hidden until risks appear
 
-    panel.innerHTML = `
-      <div class="scribbit-panel-header">
-        <div class="scribbit-panel-header-left">
-          <img class="scribbit-panel-logo" id="scribbit-panel-logo" />
-          <span class="scribbit-panel-title">Scribbit Scan</span>
-        </div>
-        <div class="scribbit-panel-header-right">
-          <span class="scribbit-panel-badge" id="scribbit-panel-level">LOW</span>
-          <button class="scribbit-panel-close" id="scribbit-panel-close">×</button>
-        </div>
-      </div>
-
-      <div class="scribbit-panel-body">
-        <div class="scribbit-panel-score" id="scribbit-panel-score">Score: 0</div>
-
-        <ul class="scribbit-panel-risks" id="scribbit-panel-risks">
-          <li class="scribbit-panel-risk-item scribbit-empty">Scanning...</li>
-        </ul>
-
-        <div class="scribbit-panel-mute-row">
-          <button class="scribbit-panel-mute-toggle" id="scribbit-mute-toggle">
-            Mute this site
-          </button>
-          <div class="scribbit-panel-mute-options" id="scribbit-mute-options">
-            <button class="scribbit-panel-mute-option" data-mute="1h">1h</button>
-            <button class="scribbit-panel-mute-option" data-mute="1d">1d</button>
-            <button class="scribbit-panel-mute-option" data-mute="1w">1w</button>
-            <button class="scribbit-panel-mute-option" data-mute="forever">∞</button>
-          </div>
-        </div>
-      </div>
-    ";
+    panel.innerHTML =
+      '<div class="scribbit-panel-header">' +
+        '<div class="scribbit-panel-header-left">' +
+          '<img class="scribbit-panel-logo" id="scribbit-panel-logo" />' +
+          '<span class="scribbit-panel-title">Scribbit Scan</span>' +
+        "</div>" +
+        '<div class="scribbit-panel-header-right">' +
+          '<span class="scribbit-panel-badge" id="scribbit-panel-level">LOW</span>' +
+          '<button class="scribbit-panel-close" id="scribbit-panel-close">×</button>' +
+        "</div>" +
+      "</div>" +
+      '<div class="scribbit-panel-body">' +
+        '<div class="scribbit-panel-score" id="scribbit-panel-score">Score: 0</div>' +
+        '<ul class="scribbit-panel-risks" id="scribbit-panel-risks">' +
+          '<li class="scribbit-panel-risk-item scribbit-empty">Scanning...</li>' +
+        "</ul>" +
+        '<div class="scribbit-panel-mute-row">' +
+          '<button class="scribbit-panel-mute-toggle" id="scribbit-mute-toggle">' +
+            "Mute this site" +
+          "</button>" +
+          '<div class="scribbit-panel-mute-options" id="scribbit-mute-options">' +
+            '<button class="scribbit-panel-mute-option" data-mute="1h">1h</button>' +
+            '<button class="scribbit-panel-mute-option" data-mute="1d">1d</button>' +
+            '<button class="scribbit-panel-mute-option" data-mute="1w">1w</button>' +
+            '<button class="scribbit-panel-mute-option" data-mute="forever">∞</button>' +
+          "</div>" +
+        "</div>" +
+      "</div>";
 
     document.body.appendChild(panel);
 
@@ -171,7 +167,7 @@
       window.__scribbitPanelClosed = true;
     });
 
-    // Collapse/expand
+    // Collapse/expand by clicking header (excluding close button)
     const header = panel.querySelector(".scribbit-panel-header");
     header.addEventListener("click", (e) => {
       if (e.target.id === "scribbit-panel-close") return;
@@ -224,7 +220,8 @@
     }
 
     // Was the panel hidden before this update? (first time we show it this load)
-    const firstTimeShow = panel.style.display === "none" || panel.style.display === "";
+    const firstTimeShow =
+      panel.style.display === "none" || panel.style.display === "";
 
     // Show now that we have risks
     panel.style.display = "block";
@@ -235,7 +232,7 @@
 
     // Update level & score
     levelBadge.textContent = result.overallLevel;
-    scoreEl.textContent = `Score: ${result.overallScore}`;
+    scoreEl.textContent = "Score: " + result.overallScore;
 
     // Update risks (top 3 for now)
     listEl.innerHTML = "";
@@ -246,7 +243,7 @@
       listEl.appendChild(li);
     });
 
-    // NEW: On first appearance for this host, decide expanded vs collapsed
+    // On first appearance for this host, decide expanded vs collapsed
     if (firstTimeShow) {
       loadPanelDisplayState((state) => {
         const expand = shouldAutoExpand(state);
@@ -284,7 +281,7 @@
 
       // Request initial state
       window.ScribbitMessaging.requestCurrentRisk().then((res) => {
-        if (res.ok && res.risk) updatePanel(res.risk);
+        if (res && res.ok && res.risk) updatePanel(res.risk);
       });
     });
   }
