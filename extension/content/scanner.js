@@ -1,21 +1,14 @@
 // content/scanner.js
 // Scribbit Fairness Scanner - Page Scanner
 //
-// Responsibilities:
-// - Extract a lightweight snapshot of the current page
-// - Detect basic currency markers
-// - Call ScribbitRiskEngine to get a risk result
-// - Send the result to background via ScribbitMessaging
-//
-// This is intentionally simple for the MVP vertical slice. Later, you can:
-// - Plug in selectors.js for site-specific extraction (Airbnb, Booking, etc.)
-// - Use feeParser.js and currencyDetector.js for richer input
-// - Support incremental rescans on DOM changes
+// Adds:
+// - Airbnb dynamic fee extraction
+// - DOM mutation observer (for late-loaded Airbnb UI)
+// - Keeps all original architecture intact
 
 (function () {
-  const MAX_TEXT_LENGTH = 50000; // prevent huge pages from blowing up messages
+  const MAX_TEXT_LENGTH = 50000;
 
-  // New: major search engines where we don't want Scribbit to pop up
   const SEARCH_ENGINE_HOSTS = [
     "www.google.com",
     "google.com",
@@ -30,115 +23,137 @@
     return SEARCH_ENGINE_HOSTS.includes(hostname);
   }
 
-  function waitForDependencies(callback) {
-    const maxAttempts = 50;
-    let attempts = 0;
+  /* -------------------------------------------------------
+   * Airbnb dynamic fee extraction
+   * ----------------------------------------------------- */
+  function extractAirbnbFees() {
+    const selectors = [
+      '[data-testid="price-breakdown-row"]',
+      '[data-testid="price-breakdown-item"]',
+      '[data-testid="fee-row"]',
+      '[data-section-id="BOOK_IT_SIDEBAR_PRICE"]',
+      'div[aria-label="Price details"]',
+      '._tt122m' // known Airbnb price section class (may change)
+    ];
 
-    const interval = setInterval(() => {
-      const hasMessaging = !!window.ScribbitMessaging;
-      const hasRiskEngine = !!window.ScribbitRiskEngine;
+    let fees = [];
 
-      if (hasMessaging && hasRiskEngine) {
-        clearInterval(interval);
-        callback();
-        return;
-      }
+    selectors.forEach(selector => {
+      document.querySelectorAll(selector).forEach(el => {
+        const txt = el.innerText || el.textContent || "";
+        if (txt.trim().length > 0) {
+          fees.push(txt.trim());
+        }
+      });
+    });
 
-      attempts += 1;
-      if (attempts >= maxAttempts) {
-        clearInterval(interval);
-        console.warn(
-          "[Scribbit] scanner.js: dependencies not available, aborting initial scan."
-        );
-      }
-    }, 200);
+    return fees;
   }
 
+  /* -------------------------------------------------------
+   * Core text extraction
+   * ----------------------------------------------------- */
   function extractPageText() {
     if (!document.body) return "";
-    const text = document.body.innerText || "";
-    if (text.length <= MAX_TEXT_LENGTH) return text;
-    return text.slice(0, MAX_TEXT_LENGTH);
+    const raw = document.body.innerText || "";
+    return raw.length <= MAX_TEXT_LENGTH ? raw : raw.slice(0, MAX_TEXT_LENGTH);
   }
 
   function detectCurrencyMarkers(rawText) {
     const markers = new Set();
 
-    // Basic symbols
     const symbolMatches = rawText.match(/[$€£¥]/g);
-    if (symbolMatches) {
-      symbolMatches.forEach((s) => markers.add(s));
-    }
+    if (symbolMatches) symbolMatches.forEach(s => markers.add(s));
 
-    // Common currency codes (case-insensitive)
     const codeMatches = rawText.match(/\b(USD|CAD|EUR|GBP|AUD|NZD)\b/gi);
-    if (codeMatches) {
-      codeMatches.forEach((c) => markers.add(c.toUpperCase()));
-    }
+    if (codeMatches) codeMatches.forEach(c => markers.add(c.toUpperCase()));
 
-    // If a dedicated currencyDetector exists, let it enhance the markers
     try {
       if (
         window.ScribbitCurrencyDetector &&
         typeof window.ScribbitCurrencyDetector.detect === "function"
       ) {
         const extra = window.ScribbitCurrencyDetector.detect(rawText);
-        if (Array.isArray(extra)) {
-          extra.forEach((m) => markers.add(m));
-        }
+        if (Array.isArray(extra)) extra.forEach(m => markers.add(m));
       }
     } catch (err) {
-      console.warn("[Scribbit] currencyDetector threw an error:", err);
+      console.warn("[Scribbit] currencyDetector error:", err);
     }
 
     return Array.from(markers);
   }
 
+  /* -------------------------------------------------------
+   * Snapshot builder
+   * ----------------------------------------------------- */
   function buildSnapshot() {
     const rawText = extractPageText();
     const textNormalized = rawText.toLowerCase();
+
+    const airbnbFees = extractAirbnbFees();
 
     return {
       url: window.location.href,
       textRaw: rawText,
       textNormalized,
-      currencySymbolsDetected: detectCurrencyMarkers(rawText)
+      currencySymbolsDetected: detectCurrencyMarkers(rawText),
+      airbnbFees
     };
   }
 
-  async function runInitialScan() {
+  /* -------------------------------------------------------
+   * Scanning & messaging
+   * ----------------------------------------------------- */
+  async function runScan() {
     const snapshot = buildSnapshot();
     const riskResult = window.ScribbitRiskEngine.evaluatePage(snapshot);
 
-    const payload = {
-      url: snapshot.url,
-      riskResult
-    };
-
     try {
-      const res = await window.ScribbitMessaging.sendScanComplete(payload);
-      if (!res || !res.ok) {
-        console.warn("[Scribbit] Scan reporting failed:", res);
-      }
+      await window.ScribbitMessaging.sendScanComplete({
+        url: snapshot.url,
+        riskResult
+      });
     } catch (err) {
-      console.error("[Scribbit] Error sending scan result:", err);
+      console.error("[Scribbit] sendScanComplete error:", err);
     }
+  }
 
-    // Optional: if you later want to talk directly to the panel (like SCRIBBIT_RISKS_UPDATED),
-    // you can also send a chrome.runtime message *in addition to* ScribbitMessaging here.
-    // For now, we leave your existing architecture untouched.
+  function waitForDependencies(callback) {
+    let tries = 0;
+    const max = 50;
+
+    const interval = setInterval(() => {
+      if (window.ScribbitMessaging && window.ScribbitRiskEngine) {
+        clearInterval(interval);
+        callback();
+      } else if (tries++ >= max) {
+        clearInterval(interval);
+        console.warn("[Scribbit] scanner.js: dependencies missing");
+      }
+    }, 200);
   }
 
   function init() {
-    // NEW: Skip scanning entirely on major search engines
     const hostname = window.location.hostname;
     if (isSearchEngineHost(hostname)) {
-      console.debug("[Scribbit] Scanner: skipping search engine host:", hostname);
+      console.debug("[Scribbit] scanner: skipping search engine:", hostname);
       return;
     }
 
     waitForDependencies(() => {
-      runInitialScan();
+      runScan();
+
+      // NEW: Re-scan when Airbnb loads dynamic fees (3-second window)
+      const observer = new MutationObserver(() => {
+        runScan();
+      });
+
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+
+      setTimeout(() => observer.disconnect(), 3000);
     });
   }
 
