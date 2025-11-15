@@ -37,13 +37,14 @@
     {
       "matches": ["<all_urls>"],
       "js": [
-        "content/scanner.js",
         "content/currencyDetector.js",
         "content/feeParser.js",
         "content/selectors.js",
         "content/rules.js",
         "content/riskEngine.js",
-        "content/messaging.js"
+        "content/messaging.js",
+        "ui/panel.js",
+        "content/scanner.js"
       ],
       "run_at": "document_idle"
     }
