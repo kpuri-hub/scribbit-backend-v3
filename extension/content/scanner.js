@@ -15,6 +15,21 @@
 (function () {
   const MAX_TEXT_LENGTH = 50000; // prevent huge pages from blowing up messages
 
+  // New: major search engines where we don't want Scribbit to pop up
+  const SEARCH_ENGINE_HOSTS = [
+    "www.google.com",
+    "google.com",
+    "www.bing.com",
+    "bing.com",
+    "search.yahoo.com",
+    "duckduckgo.com",
+    "www.duckduckgo.com"
+  ];
+
+  function isSearchEngineHost(hostname) {
+    return SEARCH_ENGINE_HOSTS.includes(hostname);
+  }
+
   function waitForDependencies(callback) {
     const maxAttempts = 50;
     let attempts = 0;
@@ -32,7 +47,9 @@
       attempts += 1;
       if (attempts >= maxAttempts) {
         clearInterval(interval);
-        console.warn("[Scribbit] scanner.js: dependencies not available, aborting initial scan.");
+        console.warn(
+          "[Scribbit] scanner.js: dependencies not available, aborting initial scan."
+        );
       }
     }, 200);
   }
@@ -61,7 +78,10 @@
 
     // If a dedicated currencyDetector exists, let it enhance the markers
     try {
-      if (window.ScribbitCurrencyDetector && typeof window.ScribbitCurrencyDetector.detect === "function") {
+      if (
+        window.ScribbitCurrencyDetector &&
+        typeof window.ScribbitCurrencyDetector.detect === "function"
+      ) {
         const extra = window.ScribbitCurrencyDetector.detect(rawText);
         if (Array.isArray(extra)) {
           extra.forEach((m) => markers.add(m));
@@ -103,9 +123,20 @@
     } catch (err) {
       console.error("[Scribbit] Error sending scan result:", err);
     }
+
+    // Optional: if you later want to talk directly to the panel (like SCRIBBIT_RISKS_UPDATED),
+    // you can also send a chrome.runtime message *in addition to* ScribbitMessaging here.
+    // For now, we leave your existing architecture untouched.
   }
 
   function init() {
+    // NEW: Skip scanning entirely on major search engines
+    const hostname = window.location.hostname;
+    if (isSearchEngineHost(hostname)) {
+      console.debug("[Scribbit] Scanner: skipping search engine host:", hostname);
+      return;
+    }
+
     waitForDependencies(() => {
       runInitialScan();
     });
