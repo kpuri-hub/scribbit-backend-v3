@@ -23,13 +23,14 @@ const ScribbitRules = (() => {
     const lowerRaw = rawText.toLowerCase();
 
     for (const keyword of keywords) {
-      let index = lowerRaw.indexOf(keyword.toLowerCase());
+      const needle = keyword.toLowerCase();
+      let index = lowerRaw.indexOf(needle);
       while (index !== -1 && snippets.length < maxSnippets) {
         const start = Math.max(0, index - 60);
-        const end = Math.min(rawText.length, index + keyword.length + 60);
+        const end = Math.min(rawText.length, index + needle.length + 60);
         const snippet = rawText.slice(start, end).trim();
         snippets.push(snippet);
-        index = lowerRaw.indexOf(keyword.toLowerCase(), index + keyword.length);
+        index = lowerRaw.indexOf(needle, index + needle.length);
       }
       if (snippets.length >= maxSnippets) break;
     }
@@ -177,7 +178,276 @@ const ScribbitRules = (() => {
     }
   };
 
-  const ALL_RULES = [REFUND_KEYWORDS_RULE, DCC_MIXED_CURRENCY_RULE];
+  /**
+   * Rule 3: Arbitration & class action waiver.
+   * Detects binding arbitration, waiver of right to sue / class action.
+   */
+  const ARBITRATION_CLAUSE_RULE = {
+    id: "arbitration_clause_basic",
+    label: "Binding arbitration and class action waiver",
+    description:
+      "Detects language that may require disputes to be resolved via arbitration and limit your right to sue or join a class action.",
+    severity: "HIGH",
+    tags: ["arbitration", "dispute_resolution"],
+
+    evaluate(snapshot) {
+      const text = snapshot.textNormalized || "";
+      if (!text) return null;
+
+      const keywords = [
+        "binding arbitration",
+        "mandatory arbitration",
+        "arbitrate",
+        "arbitration administered by",
+        "american arbitration association",
+        "aaa arbitration",
+        "jams arbitration",
+        "class action waiver",
+        "waive your right to sue",
+        "waive your right to a jury trial",
+        "waive the right to participate in a class action",
+        "waiver of class or representative actions",
+        "disputes will be resolved by arbitration",
+        "any dispute shall be resolved by arbitration",
+        "you agree to submit to arbitration"
+      ];
+
+      const hasHit = keywords.some((kw) => text.includes(kw));
+      if (!hasHit) return null;
+
+      const evidence = findKeywordEvidence(
+        text,
+        snapshot.textRaw || "",
+        keywords
+      );
+
+      if (!evidence.length) return null;
+
+      return {
+        ruleId: this.id,
+        label: this.label,
+        description: this.description,
+        severity: this.severity,
+        severityScore: SEVERITY_SCORE[this.severity],
+        tags: this.tags,
+        evidence
+      };
+    }
+  };
+
+  /**
+   * Rule 4: Auto-renew / subscription trap.
+   * Detects recurring billing and "until you cancel" style terms.
+   */
+  const AUTO_RENEWAL_RULE = {
+    id: "auto_renewal_basic",
+    label: "Automatic renewal and recurring charges",
+    description:
+      "Detects subscription terms that renew automatically and may continue charging you until you cancel.",
+    severity: "MEDIUM",
+    tags: ["subscription", "auto_renew"],
+
+    evaluate(snapshot) {
+      const text = snapshot.textNormalized || "";
+      if (!text) return null;
+
+      const keywords = [
+        "auto-renew",
+        "autorenew",
+        "auto renew",
+        "automatically renews",
+        "automatic renewal",
+        "recurring fee",
+        "recurring charge",
+        "recurring payment",
+        "continuous subscription",
+        "until you cancel",
+        "continue to be billed",
+        "charged on a recurring basis",
+        "subscription will renew automatically"
+      ];
+
+      const hasHit = keywords.some((kw) => text.includes(kw));
+      if (!hasHit) return null;
+
+      const evidence = findKeywordEvidence(
+        text,
+        snapshot.textRaw || "",
+        keywords
+      );
+
+      if (!evidence.length) return null;
+
+      return {
+        ruleId: this.id,
+        label: this.label,
+        description: this.description,
+        severity: this.severity,
+        severityScore: SEVERITY_SCORE[this.severity],
+        tags: this.tags,
+        evidence
+      };
+    }
+  };
+
+  /**
+   * Rule 5: Unilateral changes to terms.
+   * Company reserves the right to modify terms without meaningful notice.
+   */
+  const UNILATERAL_CHANGES_RULE = {
+    id: "unilateral_changes_basic",
+    label: "Company can change terms unilaterally",
+    description:
+      "Detects language that lets the company change terms at any time, which may reduce your protections over time.",
+    severity: "MEDIUM",
+    tags: ["unilateral_changes", "terms_updates"],
+
+    evaluate(snapshot) {
+      const text = snapshot.textNormalized || "";
+      if (!text) return null;
+
+      const keywords = [
+        "we may change these terms at any time",
+        "we may modify these terms at any time",
+        "we reserve the right to modify or update these terms",
+        "we may update this agreement from time to time",
+        "we may amend these terms without prior notice",
+        "changes will be effective when posted",
+        "we may change this policy at any time"
+      ];
+
+      const hasHit = keywords.some((kw) => text.includes(kw));
+      if (!hasHit) return null;
+
+      const evidence = findKeywordEvidence(
+        text,
+        snapshot.textRaw || "",
+        keywords
+      );
+
+      if (!evidence.length) return null;
+
+      return {
+        ruleId: this.id,
+        label: this.label,
+        description: this.description,
+        severity: this.severity,
+        severityScore: SEVERITY_SCORE[this.severity],
+        tags: this.tags,
+        evidence
+      };
+    }
+  };
+
+  /**
+   * Rule 6: Price anchoring / possibly misleading discounts.
+   * Detects "Was $X, Now $Y", "List price", "% off" style anchors.
+   */
+  const PRICE_ANCHORING_RULE = {
+    id: "price_anchoring_basic",
+    label: "Potentially misleading discount framing",
+    description:
+      "Detects 'Was $X, Now $Y' or similar discount language which may exaggerate the true savings.",
+    severity: "MEDIUM",
+    tags: ["pricing", "anchoring", "discounts"],
+
+    evaluate(snapshot) {
+      const raw = snapshot.textRaw || "";
+      if (!raw) return null;
+
+      const patterns = [
+        "was $",
+        "was&nbsp;$",
+        "regular price $",
+        "list price $",
+        "you save $",
+        "% off"
+      ];
+
+      const lower = raw.toLowerCase();
+      const hasHit = patterns.some((kw) => lower.includes(kw));
+      if (!hasHit) return null;
+
+      const evidence = findKeywordEvidence(
+        lower,
+        raw,
+        patterns
+      );
+
+      if (!evidence.length) return null;
+
+      return {
+        ruleId: this.id,
+        label: this.label,
+        description: this.description,
+        severity: this.severity,
+        severityScore: SEVERITY_SCORE[this.severity],
+        tags: this.tags,
+        evidence
+      };
+    }
+  };
+
+  /**
+   * Rule 7: Hidden fees (basic).
+   * Detects mention of service/booking/processing/cleaning/resort/etc. fees.
+   */
+  const HIDDEN_FEES_RULE = {
+    id: "hidden_fees_basic",
+    label: "Possible extra fees",
+    description:
+      "Detects mentions of additional service, booking, or other fees that may not be obvious upfront.",
+    severity: "MEDIUM",
+    tags: ["fees", "pricing"],
+
+    evaluate(snapshot) {
+      const text = snapshot.textNormalized || "";
+      if (!text) return null;
+
+      const keywords = [
+        "service fee",
+        "booking fee",
+        "processing fee",
+        "handling fee",
+        "convenience fee",
+        "resort fee",
+        "cleaning fee",
+        "administration fee",
+        "admin fee"
+      ];
+
+      const hasHit = keywords.some((kw) => text.includes(kw));
+      if (!hasHit) return null;
+
+      const evidence = findKeywordEvidence(
+        text,
+        snapshot.textRaw || "",
+        keywords
+      );
+
+      if (!evidence.length) return null;
+
+      return {
+        ruleId: this.id,
+        label: this.label,
+        description: this.description,
+        severity: this.severity,
+        severityScore: SEVERITY_SCORE[this.severity],
+        tags: this.tags,
+        evidence
+      };
+    }
+  };
+
+  const ALL_RULES = [
+    REFUND_KEYWORDS_RULE,
+    DCC_MIXED_CURRENCY_RULE,
+    ARBITRATION_CLAUSE_RULE,
+    AUTO_RENEWAL_RULE,
+    UNILATERAL_CHANGES_RULE,
+    PRICE_ANCHORING_RULE,
+    HIDDEN_FEES_RULE
+  ];
 
   /**
    * Run all rules against a snapshot and return an array of risk objects.
