@@ -1,0 +1,112 @@
+/* ui/panel.css */
+/* Scribbit Fairness Scanner - On-page Panel Styles */
+
+#scribbit-fairness-panel {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  max-width: 280px;
+  background: #111827;
+  color: #f9fafb;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  border-radius: 10px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+  z-index: 2147483647; /* sit above most things */
+  overflow: hidden;
+}
+
+.scribbit-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(249, 250, 251, 0.08);
+  background: #020617;
+}
+
+.scribbit-panel-title {
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-size: 10px;
+  opacity: 0.9;
+}
+
+.scribbit-panel-badge {
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.scribbit-level-low {
+  background: rgba(22, 163, 74, 0.15);
+  color: #bbf7d0;
+}
+
+.scribbit-level-medium {
+  background: rgba(234, 179, 8, 0.18);
+  color: #facc15;
+}
+
+.scribbit-level-high {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fecaca;
+}
+
+.scribbit-panel-body {
+  padding: 8px 10px 10px;
+}
+
+.scribbit-panel-score {
+  font-size: 11px;
+  margin-bottom: 6px;
+  opacity: 0.9;
+}
+
+.scribbit-panel-risks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.scribbit-panel-risk-item {
+  padding: 4px 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.scribbit-panel-risk-item:first-child {
+  border-top: none;
+}
+
+.scribbit-panel-risk-item.scribbit-empty {
+  font-style: italic;
+  opacity: 0.7;
+}
+
+.scribbit-risk-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scribbit-severity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.scribbit-severity-low {
+  background: #22c55e;
+}
+
+.scribbit-severity-medium {
+  background: #eab308;
+}
+
+.scribbit-severity-high {
+  background: #ef4444;
+}
