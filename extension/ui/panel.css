@@ -16,13 +16,38 @@
   overflow: hidden;
 }
 
+/* Collapsed state: show only header */
+#scribbit-fairness-panel.scribbit-panel-collapsed .scribbit-panel-body {
+  display: none;
+}
+
 .scribbit-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
+  padding: 6px 8px;
   border-bottom: 1px solid rgba(249, 250, 251, 0.08);
   background: #020617;
+  cursor: pointer;
+}
+
+.scribbit-panel-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scribbit-panel-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scribbit-panel-logo {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex-shrink: 0;
 }
 
 .scribbit-panel-title {
@@ -54,6 +79,20 @@
 .scribbit-level-high {
   background: rgba(239, 68, 68, 0.2);
   color: #fecaca;
+}
+
+.scribbit-panel-close {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.scribbit-panel-close:hover {
+  color: #e5e7eb;
 }
 
 .scribbit-panel-body {
