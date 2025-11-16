@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Scribbit Fairness Scanner",
-  "description": "Real-time scanning for refund traps, hidden fees, DCC/FX markups, unfair terms, and personal data risks.",
-  "version": "0.2.0",
+  "version": "0.1.0",
+  "description": "Real-time scanning for refund traps, hidden fees, DCC/FX markups, and unfair terms.",
 
   "icons": {
     "16": "assets/icons/icon16.png",
@@ -11,17 +11,9 @@
     "128": "assets/icons/icon128.png"
   },
 
-  "action": {
-    "default_popup": "ui/popup.html",
-    "default_icon": {
-      "16": "assets/icons/icon16.png",
-      "32": "assets/icons/icon32.png"
-    }
-  },
-
   "permissions": [
     "storage",
-    "activeTab",
+    "tabs",
     "scripting"
   ],
 
@@ -34,9 +26,21 @@
     "type": "module"
   },
 
+  "action": {
+    "default_title": "Scribbit Scan",
+    "default_popup": "ui/popup.html",
+    "default_icon": {
+      "16": "assets/icons/icon16.png",
+      "32": "assets/icons/icon32.png",
+      "48": "assets/icons/icon48.png"
+    }
+  },
+
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": [
+        "<all_urls>"
+      ],
       "js": [
         "content/messaging.js",
         "content/riskModel.js",
@@ -48,20 +52,23 @@
       ],
       "css": [
         "ui/panel.css"
-      ]
+      ],
+      "run_at": "document_idle"
     }
   ],
 
   "web_accessible_resources": [
     {
       "resources": [
+        "ui/panel.css",
         "assets/icons/icon16.png",
         "assets/icons/icon32.png",
         "assets/icons/icon48.png",
-        "assets/icons/icon128.png",
-        "ui/panel.css"
+        "assets/icons/icon128.png"
       ],
-      "matches": ["<all_urls>"]
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }
