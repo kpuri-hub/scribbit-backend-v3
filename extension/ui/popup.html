@@ -1,31 +1,48 @@
+<!-- ui/popup.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Scribbit</title>
+  <title>Scribbit Scan</title>
   <link rel="stylesheet" href="popup.css" />
 </head>
-
 <body>
   <div id="popup-root">
-
     <header class="popup-header">
-      <img src="../assets/icons/icon32.png" alt="Scribbit Logo" class="popup-logo" />
-      <span class="popup-title">Scribbit Scan</span>
+      <img
+        src="../assets/icons/icon32.png"
+        alt="Scribbit logo"
+        class="popup-logo"
+      />
+      <div class="popup-header-text">
+        <div class="popup-title">Scribbit Scan</div>
+        <div class="popup-subtitle" id="popup-subtitle">
+          Scanning this page…
+        </div>
+      </div>
     </header>
 
-    <div id="risk-container" class="risk-container">
-      <div class="risk-level-badge low" id="risk-level-badge">LOW</div>
-      <div class="risk-score" id="risk-score">Score: 0</div>
+    <section class="popup-overall" id="popup-overall">
+      <div class="popup-overall-level" id="popup-overall-level">Overall: –</div>
+      <div class="popup-overall-score" id="popup-overall-score">(0 / 100)</div>
+    </section>
 
-      <ul id="risk-list" class="risk-list">
-        <li class="empty">Loading...</li>
-      </ul>
-    </div>
+    <section class="popup-categories" id="popup-categories">
+      <!-- Filled by popup.js -->
+    </section>
+
+    <section class="popup-risks" id="popup-risks">
+      <!-- Filled by popup.js -->
+    </section>
 
     <footer class="popup-footer">
-      <a href="https://scribbit.co" target="_blank" class="help-link">
-        Learn more
+      <a
+        href="https://scribbit.co"
+        target="_blank"
+        rel="noreferrer"
+        class="help-link"
+      >
+        Learn more about Scribbit
       </a>
     </footer>
   </div>
