@@ -1,19 +1,71 @@
 // content/rules.js
-// Scribbit Fairness Scanner - Rule Definitions
+// Scribbit Fairness Scanner - Rule Definitions (Risk v2 aware)
 //
 // Each rule inspects a normalized page snapshot and returns either:
 //   - null (no issue detected), or
-//   - a risk object with metadata + evidence
+//   - a DetectedRisk-like object with metadata + evidence.
 //
 // This file stays PURE: no DOM, no messaging, just logic.
 
 const ScribbitRules = (() => {
-  // Map severity labels to numeric weight for scoring
-  const SEVERITY_SCORE = {
+  const SEVERITY_SCORE_LEGACY = {
     LOW: 1,
     MEDIUM: 2,
     HIGH: 3
   };
+
+  // Pull from risk model (if available)
+  const RiskModel = window.ScribbitRiskModel || {};
+  const RISK_CARDS = RiskModel.RISK_CARDS || {};
+
+  /**
+   * Helper to create a DetectedRisk object from a cardId + evidence.
+   * Keeps backward-compatible fields (label, severityScore, tags).
+   *
+   * @param {string} cardId
+   * @param {string[]} evidence
+   * @param {Object} extras
+   */
+  function createRiskFromCard(cardId, evidence, extras) {
+    const def = RISK_CARDS[cardId];
+    if (!def) {
+      console.warn("[Scribbit] Unknown risk card id:", cardId);
+      return null;
+    }
+
+    const severityUpper =
+      def.severity === "high"
+        ? "HIGH"
+        : def.severity === "med"
+        ? "MEDIUM"
+        : "LOW";
+
+    const severityScoreLegacy = SEVERITY_SCORE_LEGACY[severityUpper] || 0;
+
+    const base = {
+      // New model fields
+      id: def.id,
+      category: def.category,
+      title: def.title,
+      description: def.defaultDescription,
+      severity: def.severity, // "low" | "med" | "high"
+      autoPopupWorthy: !!def.autoPopupWorthy,
+
+      // Legacy fields used by current engine/UI
+      ruleId: def.id,
+      label: def.title,
+      severityScore: severityScoreLegacy,
+      severity: severityUpper,
+      tags: [],
+      evidence: Array.isArray(evidence) ? evidence : []
+    };
+
+    if (extras && typeof extras === "object") {
+      Object.assign(base, extras);
+    }
+
+    return base;
+  }
 
   /**
    * Helper to find keyword matches and return small evidence snippets.
@@ -39,14 +91,13 @@ const ScribbitRules = (() => {
   }
 
   /**
-   * Rule 1: Refund / cancellation language may be restrictive or unclear.
+   * Rule: Refund / cancellation language.
+   * Maps to:
+   *  - non_refundable_or_final_sale (strong terms)
+   *  - short_refund_or_return_window (weaker signals)
    */
   const REFUND_KEYWORDS_RULE = {
     id: "refund_keywords_basic",
-    label: "Refund and cancellation terms may be restrictive or unclear",
-    description: "Detects mentions of non-refundable or strict cancellation windows.",
-    severity: "MEDIUM",
-    tags: ["refunds", "cancellation"],
 
     evaluate(snapshot) {
       const text = snapshot.textNormalized || "";
@@ -59,7 +110,7 @@ const ScribbitRules = (() => {
         "no refunds",
         "no cancellations",
         "cannot be cancelled",
-        "cannot be canceled" // US spelling
+        "cannot be canceled"
       ];
 
       const weakerSignals = [
@@ -75,41 +126,42 @@ const ScribbitRules = (() => {
 
       if (!hasStrong && !hasWeak) return null;
 
+      const raw = snapshot.textRaw || "";
       const evidence = findKeywordEvidence(
         text,
-        snapshot.textRaw || "",
+        raw,
         hasStrong ? strongTerms : weakerSignals
       );
 
-      // Slightly higher severity if strong "non-refundable" style terms are present
-      const severity = hasStrong ? "HIGH" : "MEDIUM";
-
-      return {
-        ruleId: this.id,
-        label: this.label,
-        description: this.description,
-        severity,
-        severityScore: SEVERITY_SCORE[severity],
-        tags: this.tags,
-        evidence
-      };
+      if (hasStrong) {
+        const risk = createRiskFromCard(
+          "non_refundable_or_final_sale",
+          evidence,
+          {
+            tags: ["refunds", "cancellation"]
+          }
+        );
+        return risk;
+      } else {
+        const risk = createRiskFromCard(
+          "short_refund_or_return_window",
+          evidence,
+          {
+            tags: ["refunds", "cancellation"]
+          }
+        );
+        return risk;
+      }
     }
   };
 
   /**
-   * Rule 2: Possible DCC / FX confusion (local vs foreign currencies).
-   *
-   * IMPORTANT: To avoid false positives (like Booking.com showing a currency picker),
-   * this rule requires BOTH:
-   *  - multiple currencies detected, AND
-   *  - language that looks like DCC / currency conversion behavior.
+   * Rule: Possible DCC / FX confusion.
+   * Maps to:
+   *  - dcc_or_fx_markup
    */
   const DCC_MIXED_CURRENCY_RULE = {
     id: "dcc_mixed_currency_basic",
-    label: "Possible DCC / FX confusion",
-    description: "Multiple currencies plus language about conversion or card currency.",
-    severity: "MEDIUM",
-    tags: ["dcc", "fx", "currency"],
 
     evaluate(snapshot) {
       const text = (snapshot.textNormalized || "").trim();
@@ -121,7 +173,6 @@ const ScribbitRules = (() => {
       const distinct = Array.from(new Set(symbols.map((s) => String(s).toUpperCase())));
       if (distinct.length <= 1) return null;
 
-      // DCC-ish phrases we expect to see when there's a real conversion choice
       const dccPhrases = [
         "dynamic currency conversion",
         "dcc",
@@ -147,48 +198,35 @@ const ScribbitRules = (() => {
 
       const hasDccLanguage = dccPhrases.some((p) => text.includes(p));
       if (!hasDccLanguage) {
-        // Multiple currencies but no DCC/conversion language:
-        // Likely just a currency selector (e.g. Booking.com homepage) → no risk.
         return null;
       }
 
-      const evidenceSnippets = findKeywordEvidence(
-        text,
-        snapshot.textRaw || "",
-        dccPhrases
-      );
+      const raw = snapshot.textRaw || "";
+      const evidenceSnippets = findKeywordEvidence(text, raw, dccPhrases);
 
       const evidence = [
         `Detected currency markers: ${distinct.join(", ")}`
       ];
-
       if (evidenceSnippets.length) {
         evidence.push(...evidenceSnippets);
       }
 
-      return {
-        ruleId: this.id,
-        label: this.label,
-        description: this.description,
-        severity: this.severity,
-        severityScore: SEVERITY_SCORE[this.severity],
-        tags: this.tags,
-        evidence
-      };
+      const risk = createRiskFromCard("dcc_or_fx_markup", evidence, {
+        tags: ["dcc", "fx", "currency"]
+      });
+
+      return risk;
     }
   };
 
   /**
-   * Rule 3: Arbitration & class action waiver.
-   * Detects binding arbitration, waiver of right to sue / class action.
+   * Rule: Arbitration & class action waiver.
+   * For now we surface a single card:
+   *  - mandatory_arbitration
+   * (we may later split out class_action_waiver as a separate card)
    */
   const ARBITRATION_CLAUSE_RULE = {
     id: "arbitration_clause_basic",
-    label: "Binding arbitration and class action waiver",
-    description:
-      "Detects language that may require disputes to be resolved via arbitration and limit your right to sue or join a class action.",
-    severity: "HIGH",
-    tags: ["arbitration", "dispute_resolution"],
 
     evaluate(snapshot) {
       const text = snapshot.textNormalized || "";
@@ -215,37 +253,26 @@ const ScribbitRules = (() => {
       const hasHit = keywords.some((kw) => text.includes(kw));
       if (!hasHit) return null;
 
-      const evidence = findKeywordEvidence(
-        text,
-        snapshot.textRaw || "",
-        keywords
-      );
+      const raw = snapshot.textRaw || "";
+      const evidence = findKeywordEvidence(text, raw, keywords);
 
       if (!evidence.length) return null;
 
-      return {
-        ruleId: this.id,
-        label: this.label,
-        description: this.description,
-        severity: this.severity,
-        severityScore: SEVERITY_SCORE[this.severity],
-        tags: this.tags,
-        evidence
-      };
+      const risk = createRiskFromCard("mandatory_arbitration", evidence, {
+        tags: ["arbitration", "dispute_resolution"]
+      });
+
+      return risk;
     }
   };
 
   /**
-   * Rule 4: Auto-renew / subscription trap.
-   * Detects recurring billing and "until you cancel" style terms.
+   * Rule: Auto-renew / subscription trap.
+   * Maps to:
+   *  - auto_renewing_subscription
    */
   const AUTO_RENEWAL_RULE = {
     id: "auto_renewal_basic",
-    label: "Automatic renewal and recurring charges",
-    description:
-      "Detects subscription terms that renew automatically and may continue charging you until you cancel.",
-    severity: "MEDIUM",
-    tags: ["subscription", "auto_renew"],
 
     evaluate(snapshot) {
       const text = snapshot.textNormalized || "";
@@ -270,37 +297,26 @@ const ScribbitRules = (() => {
       const hasHit = keywords.some((kw) => text.includes(kw));
       if (!hasHit) return null;
 
-      const evidence = findKeywordEvidence(
-        text,
-        snapshot.textRaw || "",
-        keywords
-      );
+      const raw = snapshot.textRaw || "";
+      const evidence = findKeywordEvidence(text, raw, keywords);
 
       if (!evidence.length) return null;
 
-      return {
-        ruleId: this.id,
-        label: this.label,
-        description: this.description,
-        severity: this.severity,
-        severityScore: SEVERITY_SCORE[this.severity],
-        tags: this.tags,
-        evidence
-      };
+      const risk = createRiskFromCard("auto_renewing_subscription", evidence, {
+        tags: ["subscription", "auto_renew"]
+      });
+
+      return risk;
     }
   };
 
   /**
-   * Rule 5: Unilateral changes to terms.
-   * Company reserves the right to modify terms without meaningful notice.
+   * Rule: Unilateral changes to terms.
+   * Maps to:
+   *  - unilateral_terms_changes
    */
   const UNILATERAL_CHANGES_RULE = {
     id: "unilateral_changes_basic",
-    label: "Company can change terms unilaterally",
-    description:
-      "Detects language that lets the company change terms at any time, which may reduce your protections over time.",
-    severity: "MEDIUM",
-    tags: ["unilateral_changes", "terms_updates"],
 
     evaluate(snapshot) {
       const text = snapshot.textNormalized || "";
@@ -319,41 +335,32 @@ const ScribbitRules = (() => {
       const hasHit = keywords.some((kw) => text.includes(kw));
       if (!hasHit) return null;
 
-      const evidence = findKeywordEvidence(
-        text,
-        snapshot.textRaw || "",
-        keywords
-      );
+      const raw = snapshot.textRaw || "";
+      const evidence = findKeywordEvidence(text, raw, keywords);
 
       if (!evidence.length) return null;
 
-      return {
-        ruleId: this.id,
-        label: this.label,
-        description: this.description,
-        severity: this.severity,
-        severityScore: SEVERITY_SCORE[this.severity],
-        tags: this.tags,
-        evidence
-      };
+      const risk = createRiskFromCard("unilateral_terms_changes", evidence, {
+        tags: ["unilateral_changes", "terms_updates"]
+      });
+
+      return risk;
     }
   };
 
   /**
-   * Rule 6: Price anchoring / possibly misleading discounts.
-   * Detects "Was $X, Now $Y", "List price", "% off" style anchors.
+   * Rule: Price anchoring / possibly misleading discounts.
+   * Maps to:
+   *  - price_anchoring_or_reference_prices
    */
   const PRICE_ANCHORING_RULE = {
     id: "price_anchoring_basic",
-    label: "Potentially misleading discount framing",
-    description:
-      "Detects 'Was $X, Now $Y' or similar discount language which may exaggerate the true savings.",
-    severity: "MEDIUM",
-    tags: ["pricing", "anchoring", "discounts"],
 
     evaluate(snapshot) {
       const raw = snapshot.textRaw || "";
       if (!raw) return null;
+
+      const lower = raw.toLowerCase();
 
       const patterns = [
         "was $",
@@ -364,42 +371,34 @@ const ScribbitRules = (() => {
         "% off"
       ];
 
-      const lower = raw.toLowerCase();
       const hasHit = patterns.some((kw) => lower.includes(kw));
       if (!hasHit) return null;
 
-      const evidence = findKeywordEvidence(
-        lower,
-        raw,
-        patterns
-      );
-
+      const evidence = findKeywordEvidence(lower, raw, patterns);
       if (!evidence.length) return null;
 
-      return {
-        ruleId: this.id,
-        label: this.label,
-        description: this.description,
-        severity: this.severity,
-        severityScore: SEVERITY_SCORE[this.severity],
-        tags: this.tags,
-        evidence
-      };
+      const risk = createRiskFromCard(
+        "price_anchoring_or_reference_prices",
+        evidence,
+        {
+          tags: ["pricing", "anchoring", "discounts"]
+        }
+      );
+
+      return risk;
     }
   };
 
   /**
-   * Rule 7: Hidden fees (expanded, Airbnb-aware).
-   * Detects mention of service/booking/processing/cleaning/resort/etc. fees,
-   * including fees extracted from dynamic Airbnb price breakdowns.
+   * Rule: Hidden fees (expanded, Airbnb-aware).
+   * Maps primarily to:
+   *  - extra_fees_not_in_base_price
+   * and escalates to:
+   *  - resort_or_facility_fee
+   * when resort/facility/amenity-style words are found.
    */
   const HIDDEN_FEES_RULE = {
     id: "hidden_fees_basic",
-    label: "Possible extra or mandatory fees",
-    description:
-      "Detects mentions of additional service, booking, or other fees that may not be obvious upfront.",
-    severity: "MEDIUM",
-    tags: ["fees", "pricing"],
 
     evaluate(snapshot) {
       const text = snapshot.textNormalized || "";
@@ -470,15 +469,17 @@ const ScribbitRules = (() => {
 
       if (!evidence.length) return null;
 
-      return {
-        ruleId: this.id,
-        label: this.label,
-        description: this.description,
-        severity: this.severity,
-        severityScore: SEVERITY_SCORE[this.severity],
-        tags: this.tags,
-        evidence
-      };
+      // If resort/facility-like wording is present, use the resort-specific card.
+      let cardId = "extra_fees_not_in_base_price";
+      if (airbnbHit || text.includes("resort fee") || text.includes("facility fee")) {
+        cardId = "resort_or_facility_fee";
+      }
+
+      const risk = createRiskFromCard(cardId, evidence, {
+        tags: ["fees", "pricing"]
+      });
+
+      return risk;
     }
   };
 
@@ -513,7 +514,7 @@ const ScribbitRules = (() => {
   return {
     ALL_RULES,
     evaluateAll,
-    SEVERITY_SCORE
+    SEVERITY_SCORE: SEVERITY_SCORE_LEGACY
   };
 })();
 
