@@ -13,7 +13,9 @@
   background: #ffffff;
   border-radius: 10px;
   box-shadow: 0 10px 25px rgba(15, 23, 42, 0.25);
-  overflow: hidden;
+
+  /* FIX: Allow tooltips to extend outside */
+  overflow: visible;
 }
 
 /* Collapsed state: keep header visible, hide body */
@@ -111,6 +113,9 @@
   border-radius: 8px;
   padding: 6px 8px;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+
+  /* FIX: allow children to overflow (tooltips) */
+  overflow: visible;
 }
 
 /* Category header */
@@ -175,23 +180,12 @@
   transition: width 0.2s ease-out;
 }
 
-.scribbit-category-bar-none {
-  background: transparent;
-}
+.scribbit-category-bar-none { background: transparent; }
+.scribbit-category-bar-low { background: #22c55e; }
+.scribbit-category-bar-med { background: #eab308; }
+.scribbit-category-bar-high { background: #ef4444; }
 
-.scribbit-category-bar-low {
-  background: #22c55e;
-}
-
-.scribbit-category-bar-med {
-  background: #eab308;
-}
-
-.scribbit-category-bar-high {
-  background: #ef4444;
-}
-
-/* Risk block inside category */
+/* Risk block */
 
 .scribbit-category-risk-block {
   margin-top: 2px;
@@ -202,6 +196,10 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 6px;
+
+  /* FIX for tooltip overflow */
+  position: relative;
+  overflow: visible;
 }
 
 .scribbit-risk-title {
@@ -210,7 +208,7 @@
   color: #111827;
 }
 
-/* "Why is this risky?" */
+/* Why button */
 
 .scribbit-risk-why-wrapper {
   position: relative;
@@ -246,11 +244,12 @@
   font-size: 11px;
   line-height: 1.4;
   box-shadow: 0 8px 20px rgba(15, 23, 42, 0.35);
+
   display: none;
-  z-index: 2147483647;
+  z-index: 99999999;
 }
 
-/* little arrow */
+/* Tooltip arrow */
 .scribbit-risk-tooltip::after {
   content: "";
   position: absolute;
@@ -261,7 +260,7 @@
   border-color: #0f172a transparent transparent transparent;
 }
 
-/* Show tooltip on hover of wrapper */
+/* Hover behavior */
 .scribbit-risk-why-wrapper:hover .scribbit-risk-tooltip {
   display: block;
 }
@@ -290,8 +289,6 @@
   background: #1f2937;
 }
 
-/* Mute options dropdown */
-
 .scribbit-panel-mute-options {
   display: none;
   gap: 4px;
@@ -315,7 +312,7 @@
   background: #d1d5db;
 }
 
-/* Responsive-ish */
+/* Responsive */
 
 @media (max-width: 480px) {
   #scribbit-fairness-panel {
