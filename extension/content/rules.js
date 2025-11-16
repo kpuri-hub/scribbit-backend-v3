@@ -1,26 +1,30 @@
 // content/rules.js
-// Scribbit Fairness Scanner - Rule Definitions (Risk v2 aware)
+// Scribbit Fairness Scanner - Rule Definitions (Risk v2)
 //
 // Each rule inspects a normalized page snapshot and returns either:
 //   - null (no issue detected), or
 //   - a DetectedRisk-like object with metadata + evidence.
 //
-// This file stays PURE: no DOM, no messaging, just logic.
+// PURE logic: no direct DOM access (only uses the snapshot from scanner.js).
 
 const ScribbitRules = (() => {
-  const SEVERITY_SCORE_LEGACY = {
+  // Legacy numeric mapping used by the existing engine badge (LOW/MEDIUM/HIGH)
+  const SEVERITY_SCORE = {
     LOW: 1,
     MEDIUM: 2,
     HIGH: 3
   };
 
-  // Pull from risk model (if available)
+  // Pull risk cards from the Risk Model
   const RiskModel = window.ScribbitRiskModel || {};
   const RISK_CARDS = RiskModel.RISK_CARDS || {};
 
+  /************************************************************
+   * Helpers
+   ************************************************************/
+
   /**
-   * Helper to create a DetectedRisk object from a cardId + evidence.
-   * Keeps backward-compatible fields (label, severityScore, tags).
+   * Create a DetectedRisk object from a risk card definition.
    *
    * @param {string} cardId
    * @param {string[]} evidence
@@ -33,14 +37,15 @@ const ScribbitRules = (() => {
       return null;
     }
 
-    const severityUpper =
-      def.severity === "high"
+    const sevLower = String(def.severity || "med").toLowerCase();
+    const sevUpper =
+      sevLower === "high"
         ? "HIGH"
-        : def.severity === "med"
-        ? "MEDIUM"
-        : "LOW";
+        : sevLower === "low"
+        ? "LOW"
+        : "MEDIUM";
 
-    const severityScoreLegacy = SEVERITY_SCORE_LEGACY[severityUpper] || 0;
+    const severityScoreLegacy = SEVERITY_SCORE[sevUpper] || 0;
 
     const base = {
       // New model fields
@@ -48,14 +53,14 @@ const ScribbitRules = (() => {
       category: def.category,
       title: def.title,
       description: def.defaultDescription,
-      severity: def.severity, // "low" | "med" | "high"
+      severity: sevLower, // "low" | "med" | "high"
       autoPopupWorthy: !!def.autoPopupWorthy,
 
-      // Legacy fields used by current engine/UI
+      // Legacy fields
       ruleId: def.id,
       label: def.title,
       severityScore: severityScoreLegacy,
-      severity: severityUpper,
+      severity: sevUpper,
       tags: [],
       evidence: Array.isArray(evidence) ? evidence : []
     };
@@ -90,12 +95,11 @@ const ScribbitRules = (() => {
     return snippets;
   }
 
-  /**
-   * Rule: Refund / cancellation language.
-   * Maps to:
-   *  - non_refundable_or_final_sale (strong terms)
-   *  - short_refund_or_return_window (weaker signals)
-   */
+  /************************************************************
+   * Rule 1: Refund / cancellation language
+   *  - non_refundable_or_final_sale
+   *  - short_refund_or_return_window
+   ************************************************************/
   const REFUND_KEYWORDS_RULE = {
     id: "refund_keywords_basic",
 
@@ -133,33 +137,24 @@ const ScribbitRules = (() => {
         hasStrong ? strongTerms : weakerSignals
       );
 
+      if (!evidence.length) return null;
+
       if (hasStrong) {
-        const risk = createRiskFromCard(
-          "non_refundable_or_final_sale",
-          evidence,
-          {
-            tags: ["refunds", "cancellation"]
-          }
-        );
-        return risk;
+        return createRiskFromCard("non_refundable_or_final_sale", evidence, {
+          tags: ["refunds", "cancellation"]
+        });
       } else {
-        const risk = createRiskFromCard(
-          "short_refund_or_return_window",
-          evidence,
-          {
-            tags: ["refunds", "cancellation"]
-          }
-        );
-        return risk;
+        return createRiskFromCard("short_refund_or_return_window", evidence, {
+          tags: ["refunds", "cancellation"]
+        });
       }
     }
   };
 
-  /**
-   * Rule: Possible DCC / FX confusion.
-   * Maps to:
+  /************************************************************
+   * Rule 2: DCC / FX confusion
    *  - dcc_or_fx_markup
-   */
+   ************************************************************/
   const DCC_MIXED_CURRENCY_RULE = {
     id: "dcc_mixed_currency_basic",
 
@@ -197,9 +192,7 @@ const ScribbitRules = (() => {
       ];
 
       const hasDccLanguage = dccPhrases.some((p) => text.includes(p));
-      if (!hasDccLanguage) {
-        return null;
-      }
+      if (!hasDccLanguage) return null;
 
       const raw = snapshot.textRaw || "";
       const evidenceSnippets = findKeywordEvidence(text, raw, dccPhrases);
@@ -211,20 +204,16 @@ const ScribbitRules = (() => {
         evidence.push(...evidenceSnippets);
       }
 
-      const risk = createRiskFromCard("dcc_or_fx_markup", evidence, {
+      return createRiskFromCard("dcc_or_fx_markup", evidence, {
         tags: ["dcc", "fx", "currency"]
       });
-
-      return risk;
     }
   };
 
-  /**
-   * Rule: Arbitration & class action waiver.
-   * For now we surface a single card:
+  /************************************************************
+   * Rule 3: Arbitration / class-action waiver
    *  - mandatory_arbitration
-   * (we may later split out class_action_waiver as a separate card)
-   */
+   ************************************************************/
   const ARBITRATION_CLAUSE_RULE = {
     id: "arbitration_clause_basic",
 
@@ -255,22 +244,18 @@ const ScribbitRules = (() => {
 
       const raw = snapshot.textRaw || "";
       const evidence = findKeywordEvidence(text, raw, keywords);
-
       if (!evidence.length) return null;
 
-      const risk = createRiskFromCard("mandatory_arbitration", evidence, {
+      return createRiskFromCard("mandatory_arbitration", evidence, {
         tags: ["arbitration", "dispute_resolution"]
       });
-
-      return risk;
     }
   };
 
-  /**
-   * Rule: Auto-renew / subscription trap.
-   * Maps to:
+  /************************************************************
+   * Rule 4: Auto-renewing subscriptions
    *  - auto_renewing_subscription
-   */
+   ************************************************************/
   const AUTO_RENEWAL_RULE = {
     id: "auto_renewal_basic",
 
@@ -299,22 +284,18 @@ const ScribbitRules = (() => {
 
       const raw = snapshot.textRaw || "";
       const evidence = findKeywordEvidence(text, raw, keywords);
-
       if (!evidence.length) return null;
 
-      const risk = createRiskFromCard("auto_renewing_subscription", evidence, {
+      return createRiskFromCard("auto_renewing_subscription", evidence, {
         tags: ["subscription", "auto_renew"]
       });
-
-      return risk;
     }
   };
 
-  /**
-   * Rule: Unilateral changes to terms.
-   * Maps to:
+  /************************************************************
+   * Rule 5: Unilateral changes to terms
    *  - unilateral_terms_changes
-   */
+   ************************************************************/
   const UNILATERAL_CHANGES_RULE = {
     id: "unilateral_changes_basic",
 
@@ -337,171 +318,127 @@ const ScribbitRules = (() => {
 
       const raw = snapshot.textRaw || "";
       const evidence = findKeywordEvidence(text, raw, keywords);
-
       if (!evidence.length) return null;
 
-      const risk = createRiskFromCard("unilateral_terms_changes", evidence, {
+      return createRiskFromCard("unilateral_terms_changes", evidence, {
         tags: ["unilateral_changes", "terms_updates"]
       });
-
-      return risk;
     }
   };
 
-  /**
-   * Rule: Price anchoring / possibly misleading discounts.
-   * Maps to:
-   *  - price_anchoring_or_reference_prices
-   */
-  const PRICE_ANCHORING_RULE = {
-    id: "price_anchoring_basic",
-
-    evaluate(snapshot) {
-      const raw = snapshot.textRaw || "";
-      if (!raw) return null;
-
-      const lower = raw.toLowerCase();
-
-      const patterns = [
-        "was $",
-        "was&nbsp;$",
-        "regular price $",
-        "list price $",
-        "you save $",
-        "% off"
-      ];
-
-      const hasHit = patterns.some((kw) => lower.includes(kw));
-      if (!hasHit) return null;
-
-      const evidence = findKeywordEvidence(lower, raw, patterns);
-      if (!evidence.length) return null;
-
-      const risk = createRiskFromCard(
-        "price_anchoring_or_reference_prices",
-        evidence,
-        {
-          tags: ["pricing", "anchoring", "discounts"]
-        }
-      );
-
-      return risk;
-    }
-  };
-
-  /**
-   * Rule: Hidden fees (expanded, Airbnb-aware).
-   * Maps primarily to:
+  /************************************************************
+   * Rule 6: Hidden / extra fees (Airbnb-friendly)
    *  - extra_fees_not_in_base_price
-   * and escalates to:
-   *  - resort_or_facility_fee
-   * when resort/facility/amenity-style words are found.
-   */
+   *  - resort_or_facility_fee (when resort-style language present)
+   ************************************************************/
   const HIDDEN_FEES_RULE = {
     id: "hidden_fees_basic",
 
     evaluate(snapshot) {
       const text = snapshot.textNormalized || "";
-      const feesFromDom = (snapshot.airbnbFees || []).join(" ").toLowerCase();
+      if (!text) return null;
 
-      if (!text && !feesFromDom) return null;
+      const raw = snapshot.textRaw || "";
+      const url = snapshot.url || "";
 
-      const keywords = [
-        "service fee",
-        "booking fee",
-        "processing fee",
-        "handling fee",
-        "convenience fee",
-        "cleaning fee",
-        "administration fee",
-        "admin fee",
+      // Strong resort/facility-style fees
+      const strongFeeTerms = [
         "resort fee",
         "resort fees",
-        "property fee",
-        "property fees",
         "facility fee",
         "facility fees",
         "amenity fee",
         "amenity fees",
-        "tourism fee",
-        "tourist fee",
-        "occupancy fee",
         "destination fee",
-        "local fee",
-        "local fees",
+        "destination fees",
+        "property fee",
+        "property fees"
+      ];
+
+      // General booking/cleaning/service fees & taxes
+      const generalFeeTerms = [
+        "service fee",
+        "service fees",
+        "booking fee",
+        "booking fees",
+        "processing fee",
+        "processing fees",
+        "handling fee",
+        "handling fees",
+        "convenience fee",
+        "convenience fees",
+        "cleaning fee",
+        "cleaning fees",
+        "extra fees",
+        "extra fee",
+        "additional fees",
+        "additional fee",
         "extra charges",
         "extra charge",
-        "extra fees",
         "additional charges",
         "additional charge",
         "mandatory fee",
         "mandatory fees",
         "fees not included",
+        "taxes and fees",
         "before taxes and fees",
+        "occupancy taxes",
+        "occupancy tax",
+        "tourist tax",
+        "tourism tax",
+        "local taxes and fees",
         "collected at property",
         "paid at property",
         "charged by the property"
       ];
 
-      const textHit = keywords.some((kw) => text.includes(kw));
-      const airbnbHit = feesFromDom
-        ? /(resort|property|facility|amenity|tourism|occupancy|extra fee|local fee|additional charge|additional fee)/.test(
-            feesFromDom
-          )
-        : false;
+      let hasStrong = strongFeeTerms.some((kw) => text.includes(kw));
+      let hasGeneral = generalFeeTerms.some((kw) => text.includes(kw));
 
-      if (!textHit && !airbnbHit) return null;
-
-      const evidence = [];
-
-      if (textHit) {
-        const fromText = findKeywordEvidence(
-          text,
-          snapshot.textRaw || "",
-          keywords
-        );
-        evidence.push(...fromText);
+      // Airbnb-specific phrases that often indicate extra line items
+      if (!hasStrong && !hasGeneral && url.toLowerCase().includes("airbnb.")) {
+        const airbnbPhrases = [
+          "airbnb service fee",
+          "occupancy taxes and fees",
+          "taxes may be collected",
+          "taxes and fees may apply"
+        ];
+        hasGeneral = airbnbPhrases.some((kw) => text.includes(kw));
       }
 
-      if (airbnbHit && Array.isArray(snapshot.airbnbFees)) {
-        evidence.push(...snapshot.airbnbFees.slice(0, 3));
-      }
+      if (!hasStrong && !hasGeneral) return null;
+
+      const evidence = findKeywordEvidence(
+        text,
+        raw,
+        strongFeeTerms.concat(generalFeeTerms)
+      );
 
       if (!evidence.length) return null;
 
-      // If resort/facility-like wording is present, use the resort-specific card.
       let cardId = "extra_fees_not_in_base_price";
-      const lowerText = text;
-      if (
-        airbnbHit ||
-        lowerText.includes("resort fee") ||
-        lowerText.includes("facility fee") ||
-        lowerText.includes("amenity fee")
-      ) {
+      if (hasStrong) {
         cardId = "resort_or_facility_fee";
       }
 
-      const risk = createRiskFromCard(cardId, evidence, {
+      return createRiskFromCard(cardId, evidence, {
         tags: ["fees", "pricing"]
       });
-
-      return risk;
     }
   };
 
+  /************************************************************
+   * Aggregate
+   ************************************************************/
   const ALL_RULES = [
     REFUND_KEYWORDS_RULE,
     DCC_MIXED_CURRENCY_RULE,
     ARBITRATION_CLAUSE_RULE,
     AUTO_RENEWAL_RULE,
     UNILATERAL_CHANGES_RULE,
-    PRICE_ANCHORING_RULE,
     HIDDEN_FEES_RULE
   ];
 
-  /**
-   * Run all rules against a snapshot and return an array of risk objects.
-   */
   function evaluateAll(snapshot) {
     const risks = [];
     for (const rule of ALL_RULES) {
@@ -520,9 +457,9 @@ const ScribbitRules = (() => {
   return {
     ALL_RULES,
     evaluateAll,
-    SEVERITY_SCORE: SEVERITY_SCORE_LEGACY
+    SEVERITY_SCORE
   };
 })();
 
-// Expose globally in content script context
+// Expose globally
 window.ScribbitRules = ScribbitRules;
