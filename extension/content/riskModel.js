@@ -1,32 +1,20 @@
 // content/riskModel.js
-// Scribbit Risk v2 - Data model, catalog, and scoring helpers
-//
-// Plain JS version (no TypeScript), exposed as window.ScribbitRiskModel.
+// Scribbit Risk Model v2 – Categories, Risk Cards, Scoring, Auto-Popup Logic
 
 (function () {
-  /**
-   * Risk categories (user-facing groups).
-   *
-   * financial      - money, fees, refunds, FX
-   * data_privacy   - personal data, tracking, retention
-   * content_ip     - images, uploads, IP & reuse
-   * legal_rights   - arbitration, waivers, liability, account control
-   */
+  /************************************************************
+   * 1. CATEGORY TYPES (4 pillars)
+   ************************************************************/
+  const RISK_CATEGORIES = {
+    financial: "financial",
+    data_privacy: "data_privacy",
+    content_ip: "content_ip",
+    legal_rights: "legal_rights"
+  };
 
-  /** @typedef {"financial" | "data_privacy" | "content_ip" | "legal_rights"} RiskCategoryId */
-  /** @typedef {"low" | "med" | "high"} Severity */
-
-  /**
-   * @typedef {Object} RiskCardDefinition
-   * @property {string} id
-   * @property {RiskCategoryId} category
-   * @property {string} title
-   * @property {string} defaultDescription
-   * @property {Severity} severity
-   * @property {boolean} autoPopupWorthy
-   */
-
-  /** @type {Record<string, RiskCardDefinition>} */
+  /************************************************************
+   * 2. RISK CARD CATALOG (all definitions)
+   ************************************************************/
   const RISK_CARDS = {
     // ======================
     // A. Financial Exposure
@@ -130,17 +118,6 @@
         "You may be billed in a different currency than expected, which can add extra fees or FX charges.",
       severity: "med",
       autoPopupWorthy: true
-    },
-
-    // A.1 – Extra card for price anchoring / reference prices
-    price_anchoring_or_reference_prices: {
-      id: "price_anchoring_or_reference_prices",
-      category: "financial",
-      title: "Possibly Misleading Discounts",
-      defaultDescription:
-        "The page uses 'Was $X, Now $Y' or similar reference prices that may exaggerate your true savings.",
-      severity: "med",
-      autoPopupWorthy: false
     },
 
     // ===========================
@@ -356,47 +333,38 @@
     }
   };
 
-  /** @typedef {"auth" | "low-content" | "content-rich"} PageMode */
-
-  /**
-   * @typedef {Object} PageContext
-   * @property {string} url
-   * @property {PageMode} pageMode
-   * @property {number} textLength
-   */
-
-  /** Classify page mode from URL + text length. */
+  /************************************************************
+   * 3. PAGE CONTEXT
+   ************************************************************/
   function classifyPageMode(url, textLength) {
-    const lowerUrl = (url || "").toLowerCase();
+    const lower = (url || "").toLowerCase();
 
     const looksAuth =
-      lowerUrl.includes("/login") ||
-      lowerUrl.includes("/signin") ||
-      lowerUrl.includes("/sign-in") ||
-      lowerUrl.includes("/auth") ||
-      lowerUrl.includes("/register") ||
-      lowerUrl.includes("/signup");
+      lower.includes("/login") ||
+      lower.includes("/signin") ||
+      lower.includes("/sign-in") ||
+      lower.includes("/auth") ||
+      lower.includes("/register") ||
+      lower.includes("/signup");
 
     if (looksAuth) return "auth";
 
-    const LOW_CONTENT_THRESHOLD = 800; // characters, tunable
-
+    const LOW_CONTENT_THRESHOLD = 800;
     if (textLength < LOW_CONTENT_THRESHOLD) return "low-content";
 
     return "content-rich";
   }
 
-  /** Whether the page has “meaningful” content to analyze. */
   function computeHasMeaningfulContent(pageMode, textLength) {
     if (pageMode === "content-rich") return true;
 
-    const MIN_MEANINGFUL_TEXT = 600; // tunable
-    if (pageMode === "auth") return false;
-
-    return textLength >= MIN_MEANINGFUL_TEXT;
+    // fallback threshold
+    return textLength >= 600 && pageMode !== "auth";
   }
 
-  /** Map severity label to numeric score (0–100). */
+  /************************************************************
+   * 4. SCORING
+   ************************************************************/
   function severityToScore(sev) {
     switch (sev) {
       case "high":
@@ -405,12 +373,10 @@
         return 50;
       case "low":
         return 25;
-      default:
-        return 0;
     }
+    return 0;
   }
 
-  /** Compute per-category scores (0–100) from detected risks. */
   function computeCategoryScores(risks) {
     const base = {
       financial: 0,
@@ -419,65 +385,57 @@
       legal_rights: 0
     };
 
-    if (!Array.isArray(risks)) return base;
-
     for (const r of risks) {
-      if (!r || !r.category || !r.severity) continue;
       const s = severityToScore(r.severity);
       if (s > base[r.category]) {
         base[r.category] = s;
       }
     }
+
     return base;
   }
 
-  /** Global = max of category scores. */
   function computeGlobalRiskScore(categoryScores) {
-    const values = Object.values(categoryScores || {});
-    if (!values.length) return 0;
-    return Math.max.apply(null, values);
+    return Math.max(...Object.values(categoryScores));
   }
 
-  const AUTO_POPUP_SCORE_THRESHOLD = 50; // “medium” and up
+  /************************************************************
+   * 5. AUTO POPUP LOGIC
+   ************************************************************/
+  const AUTO_POPUP_SCORE_THRESHOLD = 50;
 
   function hasAutoPopupWorthyRisk(risks) {
-    return Array.isArray(risks) && risks.some((r) => r && r.autoPopupWorthy);
+    return risks.some((r) => r.autoPopupWorthy);
   }
 
-  /**
-   * Decide whether to auto-pop panel for this page.
-   *
-   * @param {Object} analysisResult
-   * @param {Array} analysisResult.risks
-   * @param {number} analysisResult.riskScore
-   * @param {boolean} analysisResult.hasMeaningfulContent
-   * @param {PageContext} context
-   */
-  function shouldAutoPopup(analysisResult, context) {
-    const isAuthOrLowContent =
-      context.pageMode === "auth" || !analysisResult.hasMeaningfulContent;
+  function shouldAutoPopup(result, context) {
+    const noContent =
+      context.pageMode === "auth" || !result.hasMeaningfulContent;
 
-    const hasRealRisk =
-      (analysisResult.riskScore || 0) >= AUTO_POPUP_SCORE_THRESHOLD &&
-      Array.isArray(analysisResult.risks) &&
-      analysisResult.risks.length > 0 &&
-      hasAutoPopupWorthyRisk(analysisResult.risks);
+    const significantRisk =
+      result.riskScore >= AUTO_POPUP_SCORE_THRESHOLD &&
+      result.risks.length > 0 &&
+      hasAutoPopupWorthyRisk(result.risks);
 
-    if (isAuthOrLowContent) return false;
-    if (!hasRealRisk) return false;
+    if (noContent) return false;
+    if (!significantRisk) return false;
 
     return true;
   }
 
-  const ScribbitRiskModel = {
+  /************************************************************
+   * EXPORT GLOBAL
+   ************************************************************/
+  window.ScribbitRiskModel = {
     RISK_CARDS,
+    RISK_CATEGORIES,
+
     classifyPageMode,
     computeHasMeaningfulContent,
-    severityToScore,
+
     computeCategoryScores,
     computeGlobalRiskScore,
+
     shouldAutoPopup
   };
-
-  window.ScribbitRiskModel = ScribbitRiskModel;
 })();
