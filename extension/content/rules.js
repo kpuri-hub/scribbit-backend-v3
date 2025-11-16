@@ -471,7 +471,13 @@ const ScribbitRules = (() => {
 
       // If resort/facility-like wording is present, use the resort-specific card.
       let cardId = "extra_fees_not_in_base_price";
-      if (airbnbHit || text.includes("resort fee") || text.includes("facility fee")) {
+      const lowerText = text;
+      if (
+        airbnbHit ||
+        lowerText.includes("resort fee") ||
+        lowerText.includes("facility fee") ||
+        lowerText.includes("amenity fee")
+      ) {
         cardId = "resort_or_facility_fee";
       }
 
