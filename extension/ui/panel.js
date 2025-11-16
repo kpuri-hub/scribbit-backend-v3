@@ -8,6 +8,7 @@
 // - Mute site (1h, 1d, 1w, forever)
 // - Scribbit logo
 // - Expand once per host, then start collapsed on subsequent loads
+// - "Why?" toggle per risk to show evidence snippets
 
 (function () {
   const PANEL_ID = "scribbit-fairness-panel";
@@ -203,6 +204,22 @@
   }
 
   /**********************************************************
+   * RISK EVIDENCE HELPERS
+   **********************************************************/
+
+  function summarizeEvidence(risk) {
+    if (!risk || !Array.isArray(risk.evidence) || risk.evidence.length === 0) {
+      return "";
+    }
+    let text = risk.evidence[0] || "";
+    text = text.trim();
+    if (text.length > 220) {
+      text = text.slice(0, 217) + "...";
+    }
+    return text;
+  }
+
+  /**********************************************************
    * UPDATE PANEL WITH RISK STATE
    **********************************************************/
 
@@ -239,7 +256,42 @@
     result.risks.slice(0, 3).forEach((risk) => {
       const li = document.createElement("li");
       li.className = "scribbit-panel-risk-item";
-      li.textContent = risk.label;
+
+      const row = document.createElement("div");
+      row.className = "scribbit-risk-row";
+
+      const labelSpan = document.createElement("span");
+      labelSpan.className = "scribbit-risk-label";
+      labelSpan.textContent = risk.label;
+
+      const whyBtn = document.createElement("button");
+      whyBtn.className = "scribbit-risk-why";
+      whyBtn.type = "button";
+      whyBtn.textContent = "Why?";
+
+      const evidenceDiv = document.createElement("div");
+      evidenceDiv.className = "scribbit-risk-evidence";
+
+      const summary = summarizeEvidence(risk);
+      evidenceDiv.textContent = summary || "No additional details available.";
+      // hidden by default; CSS controls display based on .visible
+      // but we only toggle the class in JS
+
+      // Toggle evidence on click
+      function toggleEvidence(e) {
+        e.stopPropagation();
+        evidenceDiv.classList.toggle("visible");
+      }
+
+      labelSpan.addEventListener("click", toggleEvidence);
+      whyBtn.addEventListener("click", toggleEvidence);
+
+      row.appendChild(labelSpan);
+      row.appendChild(whyBtn);
+
+      li.appendChild(row);
+      li.appendChild(evidenceDiv);
+
       listEl.appendChild(li);
     });
 
