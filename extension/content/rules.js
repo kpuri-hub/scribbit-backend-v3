@@ -100,7 +100,7 @@ const ScribbitRules = (() => {
    * Rule 2: Possible DCC / FX confusion (local vs foreign currencies).
    *
    * IMPORTANT: To avoid false positives (like Booking.com showing a currency picker),
-   * this rule now requires BOTH:
+   * this rule requires BOTH:
    *  - multiple currencies detected, AND
    *  - language that looks like DCC / currency conversion behavior.
    */
@@ -389,12 +389,13 @@ const ScribbitRules = (() => {
   };
 
   /**
-   * Rule 7: Hidden fees (basic).
-   * Detects mention of service/booking/processing/cleaning/resort/etc. fees.
+   * Rule 7: Hidden fees (expanded, Airbnb-aware).
+   * Detects mention of service/booking/processing/cleaning/resort/etc. fees,
+   * including fees extracted from dynamic Airbnb price breakdowns.
    */
   const HIDDEN_FEES_RULE = {
     id: "hidden_fees_basic",
-    label: "Possible extra fees",
+    label: "Possible extra or mandatory fees",
     description:
       "Detects mentions of additional service, booking, or other fees that may not be obvious upfront.",
     severity: "MEDIUM",
@@ -402,7 +403,9 @@ const ScribbitRules = (() => {
 
     evaluate(snapshot) {
       const text = snapshot.textNormalized || "";
-      if (!text) return null;
+      const feesFromDom = (snapshot.airbnbFees || []).join(" ").toLowerCase();
+
+      if (!text && !feesFromDom) return null;
 
       const keywords = [
         "service fee",
@@ -410,20 +413,60 @@ const ScribbitRules = (() => {
         "processing fee",
         "handling fee",
         "convenience fee",
-        "resort fee",
         "cleaning fee",
         "administration fee",
-        "admin fee"
+        "admin fee",
+        "resort fee",
+        "resort fees",
+        "property fee",
+        "property fees",
+        "facility fee",
+        "facility fees",
+        "amenity fee",
+        "amenity fees",
+        "tourism fee",
+        "tourist fee",
+        "occupancy fee",
+        "destination fee",
+        "local fee",
+        "local fees",
+        "extra charges",
+        "extra charge",
+        "extra fees",
+        "additional charges",
+        "additional charge",
+        "mandatory fee",
+        "mandatory fees",
+        "fees not included",
+        "before taxes and fees",
+        "collected at property",
+        "paid at property",
+        "charged by the property"
       ];
 
-      const hasHit = keywords.some((kw) => text.includes(kw));
-      if (!hasHit) return null;
+      const textHit = keywords.some((kw) => text.includes(kw));
+      const airbnbHit = feesFromDom
+        ? /(resort|property|facility|amenity|tourism|occupancy|extra fee|local fee|additional charge|additional fee)/.test(
+            feesFromDom
+          )
+        : false;
 
-      const evidence = findKeywordEvidence(
-        text,
-        snapshot.textRaw || "",
-        keywords
-      );
+      if (!textHit && !airbnbHit) return null;
+
+      const evidence = [];
+
+      if (textHit) {
+        const fromText = findKeywordEvidence(
+          text,
+          snapshot.textRaw || "",
+          keywords
+        );
+        evidence.push(...fromText);
+      }
+
+      if (airbnbHit && Array.isArray(snapshot.airbnbFees)) {
+        evidence.push(...snapshot.airbnbFees.slice(0, 3));
+      }
 
       if (!evidence.length) return null;
 
