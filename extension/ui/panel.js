@@ -11,6 +11,7 @@
 // - Expand once per host (per-session), then start collapsed
 // - 4 risk categories with top risk per category
 // - "Why is this risky?" hover tooltip per risk, with clear explanation
+// - ALWAYS show all 4 categories; categories with no risk show a "no significant risks" note.
 
 (function () {
   const PANEL_ID = "scribbit-fairness-panel";
@@ -279,7 +280,7 @@
   }
 
   /**********************************************************
-   * RENDER CATEGORY CARDS
+   * RENDER CATEGORY CARDS — ALWAYS 4 CATEGORIES
    **********************************************************/
 
   function renderCategories(container, result) {
@@ -298,10 +299,6 @@
     categoryIds.forEach((catId) => {
       const score = categoryScores[catId] || 0;
       const topRisk = pickTopRiskForCategory(allRisks, catId);
-
-      if (!topRisk && score <= 0) {
-        return;
-      }
 
       const card = document.createElement("div");
       card.className = "scribbit-category-card";
@@ -341,10 +338,11 @@
       card.appendChild(header);
       card.appendChild(barWrap);
 
-      if (topRisk) {
-        const riskBlock = document.createElement("div");
-        riskBlock.className = "scribbit-category-risk-block";
+      const riskBlock = document.createElement("div");
+      riskBlock.className = "scribbit-category-risk-block";
 
+      if (topRisk) {
+        // Show top risk + "Why is this risky?"
         const titleRow = document.createElement("div");
         titleRow.className = "scribbit-category-risk-title-row";
 
@@ -374,9 +372,15 @@
         titleRow.appendChild(whyWrapper);
 
         riskBlock.appendChild(titleRow);
-        card.appendChild(riskBlock);
+      } else {
+        // No risk in this category → show gentle "no issues" message
+        const noRiskMsg = document.createElement("div");
+        noRiskMsg.className = "scribbit-no-risk-text";
+        noRiskMsg.textContent = "No significant risks detected in this area.";
+        riskBlock.appendChild(noRiskMsg);
       }
 
+      card.appendChild(riskBlock);
       container.appendChild(card);
     });
   }
@@ -392,7 +396,7 @@
     const panel = document.getElementById(PANEL_ID);
     if (!panel) return;
 
-    // 🚫 Do NOT show the panel if zero risks
+    // 🚫 Do NOT show the panel if zero risks overall
     if (!result.risks || result.risks.length === 0) {
       panel.style.display = "none";
       return;
