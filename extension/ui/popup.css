@@ -1,5 +1,5 @@
 /* ui/popup.css */
-/* Scribbit Fairness Scanner - Popup UI (Risk v2) */
+/* Scribbit Fairness Scanner - Popup UI (Risk v2, Fixed Layout) */
 
 body {
   margin: 0;
@@ -7,92 +7,102 @@ body {
   background: #020617;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #f9fafb;
-  width: 280px;
+
+  /* FIX #1 — Increase popup width so categories fit */
+  width: 360px;
+
+  /* FIX #2 — allow tall content */
+  min-height: 350px;
 }
 
 #popup-root {
-  padding: 10px 12px 12px;
+  padding: 12px 16px 16px;
+
+  /* FIX #3 — ensure long content doesn't get cut */
+  overflow-y: auto;
+  max-height: 600px;
 }
 
-/* Header */
+/* HEADER */
 
 .popup-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-bottom: 8px;
+  padding-bottom: 10px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.3);
 }
 
 .popup-logo {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   border-radius: 6px;
 }
 
 .popup-header-text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
 }
 
 .popup-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
 .popup-subtitle {
-  font-size: 11px;
+  font-size: 12px;
   color: #9ca3af;
 }
 
-/* Overall section */
+/* OVERALL SUMMARY */
 
 .popup-overall {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
-  margin-top: 8px;
-  margin-bottom: 8px;
+  margin-top: 12px;
 }
 
 .popup-overall-level {
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .popup-overall-score {
-  font-size: 11px;
+  font-size: 12px;
   color: #9ca3af;
 }
 
-/* Categories */
+/* CATEGORY SECTION */
 
 .popup-categories {
-  margin-top: 4px;
-  margin-bottom: 10px;
+  margin-top: 12px;
+
+  /* FIX #4 — ensure you see ALL four categories */
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 12px;
 }
 
 .popup-category-row {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+
+  /* FIX #5 — force categories to render fully */
+  overflow: visible;
 }
 
 .popup-category-label {
-  font-size: 11px;
+  font-size: 12px;
   color: #e5e7eb;
+  font-weight: 500;
 }
 
 .popup-category-bar {
-  position: relative;
   width: 100%;
-  height: 4px;
+  height: 6px;
   border-radius: 999px;
   background: rgba(31, 41, 55, 0.9);
   overflow: hidden;
@@ -120,25 +130,25 @@ body {
   background: #ef4444;
 }
 
-/* Risks */
+/* RISK LIST */
 
 .popup-risks {
+  margin-top: 16px;
+  padding-top: 12px;
   border-top: 1px solid rgba(148, 163, 184, 0.3);
-  padding-top: 8px;
-  margin-top: 4px;
 }
 
 .popup-risks-empty {
-  font-size: 11px;
-  color: #9ca3af;
+  font-size: 12px;
   line-height: 1.4;
+  color: #9ca3af;
 }
 
 .popup-risk-item {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
-  padding: 5px 0;
+  gap: 8px;
+  padding: 10px 0;
   border-top: 1px solid rgba(15, 23, 42, 0.7);
 }
 
@@ -147,10 +157,10 @@ body {
 }
 
 .popup-risk-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
   border-radius: 999px;
-  margin-top: 4px;
+  margin-top: 5px;
   flex-shrink: 0;
 }
 
@@ -166,32 +176,27 @@ body {
   background: #ef4444;
 }
 
-.popup-risk-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
 .popup-risk-title {
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 3px;
 }
 
 .popup-risk-description {
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.45;
   color: #d1d5db;
-  line-height: 1.4;
 }
 
-/* Footer */
+/* FOOTER */
 
 .popup-footer {
-  margin-top: 8px;
+  margin-top: 18px;
   text-align: left;
 }
 
 .help-link {
-  font-size: 11px;
+  font-size: 12px;
   color: #38bdf8;
   text-decoration: none;
 }
