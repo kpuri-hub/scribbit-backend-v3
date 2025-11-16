@@ -10,7 +10,7 @@
 // - Scribbit logo
 // - Expand once per host (per-session), then start collapsed
 // - 4 risk categories with top risk per category
-// - "Why is this risky?" hover tooltip per risk
+// - "Why is this risky?" hover tooltip per risk, with clear explanation
 
 (function () {
   const PANEL_ID = "scribbit-fairness-panel";
@@ -48,7 +48,6 @@
 
   function loadPanelDisplayState(callback) {
     if (!chrome.storage || !chrome.storage.session) {
-      // No session storage available → treat as "never shown"
       return callback({ hasShownExpanded: false, lastShownAt: 0 });
     }
 
@@ -83,7 +82,6 @@
       const entry = rules[host];
 
       if (!entry) return callback(false);
-
       if (entry.until === null) return callback(true); // indefinite
 
       if (entry.until > Date.now()) return callback(true);
@@ -140,7 +138,7 @@
       "</div>" +
       '<div class="scribbit-panel-body">' +
         '<div class="scribbit-panel-summary" id="scribbit-panel-summary">' +
-          'Overall risk: Low' +
+          "Overall risk: Low" +
         "</div>" +
         '<div class="scribbit-category-list" id="scribbit-category-list"></div>' +
         '<div class="scribbit-panel-mute-row">' +
@@ -209,19 +207,28 @@
    * RISK / CATEGORY HELPERS
    **********************************************************/
 
-  function summarizeEvidence(risk) {
-    if (!risk || !Array.isArray(risk.evidence) || risk.evidence.length === 0) {
-      return risk && risk.description ? risk.description : "";
+  function buildTooltipText(risk) {
+    if (!risk) return "";
+
+    const title = risk.title || risk.label || "";
+    let description = risk.description || "";
+
+    // If we don't have a proper description (e.g., older rules),
+    // fall back to first evidence snippet.
+    if (!description && Array.isArray(risk.evidence) && risk.evidence.length) {
+      const snippet = (risk.evidence[0] || "").trim();
+      if (snippet) {
+        description = snippet;
+      }
     }
-    let text = risk.evidence[0] || "";
-    text = text.trim();
-    if (!text) {
-      text = risk.description || "";
+
+    if (!title && !description) return "";
+
+    if (title && description) {
+      return title + ": " + description;
     }
-    if (text.length > 220) {
-      text = text.slice(0, 217) + "...";
-    }
-    return text;
+
+    return title || description;
   }
 
   function categoryDisplayName(categoryId) {
@@ -292,7 +299,6 @@
       const score = categoryScores[catId] || 0;
       const topRisk = pickTopRiskForCategory(allRisks, catId);
 
-      // If there's truly nothing in this category, skip for now
       if (!topRisk && score <= 0) {
         return;
       }
@@ -356,8 +362,10 @@
 
         const tooltip = document.createElement("div");
         tooltip.className = "scribbit-risk-tooltip";
+
+        const tooltipText = buildTooltipText(topRisk);
         tooltip.textContent =
-          summarizeEvidence(topRisk) || "No additional details available.";
+          tooltipText || "Scribbit flagged this based on how this clause is written.";
 
         whyWrapper.appendChild(whyBtn);
         whyWrapper.appendChild(tooltip);
@@ -390,33 +398,27 @@
       return;
     }
 
-    // Was the panel hidden before this update? (first time we show it this load)
     const firstTimeShow =
       panel.style.display === "none" || panel.style.display === "";
 
-    // Show now that we have risks
     panel.style.display = "block";
 
     const levelBadge = document.getElementById("scribbit-panel-level");
     const summaryEl = document.getElementById("scribbit-panel-summary");
     const categoryList = document.getElementById("scribbit-category-list");
 
-    // Legacy level badge (still uses overallLevel from engine)
     if (levelBadge && result.overallLevel) {
       levelBadge.textContent = result.overallLevel;
     }
 
-    // Summary line from riskScore
     if (summaryEl) {
       summaryEl.textContent = formatOverallSummary(result);
     }
 
-    // Render categories + top risks
     if (categoryList) {
       renderCategories(categoryList, result);
     }
 
-    // On first appearance for this host, decide expanded vs collapsed
     if (firstTimeShow) {
       loadPanelDisplayState((state) => {
         const expand = shouldAutoExpand(state);
@@ -438,7 +440,6 @@
    **********************************************************/
 
   function init() {
-    // First check if muted
     isHostMuted((muted) => {
       if (muted) return;
 
@@ -447,12 +448,10 @@
 
       if (!window.ScribbitMessaging) return;
 
-      // Subscribe to updates
       window.ScribbitMessaging.onRiskUpdated((state) => {
         updatePanel(state);
       });
 
-      // Request initial state
       window.ScribbitMessaging.requestCurrentRisk().then((res) => {
         if (res && res.ok && res.risk) updatePanel(res.risk);
       });
