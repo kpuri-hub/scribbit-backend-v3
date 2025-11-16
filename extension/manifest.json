@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Scribbit Fairness Scanner",
-  "description": "Real-time scanning for refund traps, hidden fees, DCC/FX markups, and unfair terms.",
+  "description": "Real-time scanning for refund traps, hidden fees, DCC/FX markups, unfair terms, and rights you may be giving up.",
   "version": "0.1.0",
 
   "icons": {
@@ -20,9 +20,9 @@
   },
 
   "permissions": [
-    "scripting",
+    "storage",
     "activeTab",
-    "storage"
+    "scripting"
   ],
 
   "host_permissions": [
@@ -30,32 +30,36 @@
   ],
 
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
 
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
       "js": [
-        "content/currencyDetector.js",
-        "content/feeParser.js",
-        "content/selectors.js",
+        "content/messaging.js",
+        "content/riskModel.js",
         "content/rules.js",
         "content/riskEngine.js",
-        "content/messaging.js",
-        "ui/panel.js",
-        "content/scanner.js"
+        "content/currencyDetector.js",
+        "content/scanner.js",
+        "ui/panel.js"
       ],
-      "run_at": "document_idle"
+      "css": [
+        "ui/panel.css"
+      ]
     }
   ],
 
   "web_accessible_resources": [
     {
       "resources": [
-        "ui/panel.css",
-        "ui/panel.js",
-        "assets/icons/*"
+        "assets/icons/icon16.png",
+        "assets/icons/icon32.png",
+        "assets/icons/icon48.png",
+        "assets/icons/icon128.png",
+        "ui/panel.css"
       ],
       "matches": ["<all_urls>"]
     }
