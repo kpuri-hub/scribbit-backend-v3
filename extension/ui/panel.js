@@ -1,5 +1,6 @@
 // ui/panel.js
-// Scribbit Fairness Scanner - On-page Panel
+// Scribbit Fairness Scanner - On-page Panel (Risk v2 UI)
+//
 // Features:
 // - Does NOT show on search engines
 // - Does NOT show when risks == 0
@@ -7,8 +8,9 @@
 // - Close button
 // - Mute site (1h, 1d, 1w, forever)
 // - Scribbit logo
-// - Expand once per host, then start collapsed on subsequent loads
-// - "Why?" toggle per risk to show evidence snippets
+// - Expand once per host (per-session), then start collapsed
+// - 4 risk categories with top risk per category
+// - "Why is this risky?" hover tooltip per risk
 
 (function () {
   const PANEL_ID = "scribbit-fairness-panel";
@@ -137,10 +139,10 @@
         "</div>" +
       "</div>" +
       '<div class="scribbit-panel-body">' +
-        '<div class="scribbit-panel-score" id="scribbit-panel-score">Score: 0</div>' +
-        '<ul class="scribbit-panel-risks" id="scribbit-panel-risks">' +
-          '<li class="scribbit-panel-risk-item scribbit-empty">Scanning...</li>' +
-        "</ul>" +
+        '<div class="scribbit-panel-summary" id="scribbit-panel-summary">' +
+          'Overall risk: Low' +
+        "</div>" +
+        '<div class="scribbit-category-list" id="scribbit-category-list"></div>' +
         '<div class="scribbit-panel-mute-row">' +
           '<button class="scribbit-panel-mute-toggle" id="scribbit-mute-toggle">' +
             "Mute this site" +
@@ -204,19 +206,171 @@
   }
 
   /**********************************************************
-   * RISK EVIDENCE HELPERS
+   * RISK / CATEGORY HELPERS
    **********************************************************/
 
   function summarizeEvidence(risk) {
     if (!risk || !Array.isArray(risk.evidence) || risk.evidence.length === 0) {
-      return "";
+      return risk && risk.description ? risk.description : "";
     }
     let text = risk.evidence[0] || "";
     text = text.trim();
+    if (!text) {
+      text = risk.description || "";
+    }
     if (text.length > 220) {
       text = text.slice(0, 217) + "...";
     }
     return text;
+  }
+
+  function categoryDisplayName(categoryId) {
+    switch (categoryId) {
+      case "financial":
+        return "Financial Exposure";
+      case "data_privacy":
+        return "Personal Data & Privacy";
+      case "content_ip":
+        return "Content & Image Rights";
+      case "legal_rights":
+        return "Legal Rights & Control";
+      default:
+        return "Other";
+    }
+  }
+
+  function categoryScoreToLevel(score) {
+    if (score <= 0) return "none";
+    if (score < 40) return "low";
+    if (score < 70) return "med";
+    return "high";
+  }
+
+  function severityOrderValue(sev) {
+    // Sort: high → med → low
+    if (!sev) return 99;
+    const s = String(sev).toLowerCase();
+    if (s === "high") return 0;
+    if (s === "med" || s === "medium") return 1;
+    if (s === "low") return 2;
+    return 99;
+  }
+
+  function pickTopRiskForCategory(risks, categoryId) {
+    const filtered = risks.filter((r) => r.category === categoryId);
+    if (!filtered.length) return null;
+    filtered.sort((a, b) => severityOrderValue(a.severity) - severityOrderValue(b.severity));
+    return filtered[0];
+  }
+
+  function formatOverallSummary(result) {
+    const score = typeof result.riskScore === "number" ? result.riskScore : 0;
+    let level = "Low";
+    if (score >= 70) level = "High";
+    else if (score >= 40) level = "Medium";
+    return "Overall risk: " + level + " (" + Math.round(score) + "/100)";
+  }
+
+  /**********************************************************
+   * RENDER CATEGORY CARDS
+   **********************************************************/
+
+  function renderCategories(container, result) {
+    const allRisks = result.risks || [];
+    const categoryScores = result.categoryScores || {
+      financial: 0,
+      data_privacy: 0,
+      content_ip: 0,
+      legal_rights: 0
+    };
+
+    const categoryIds = ["financial", "data_privacy", "content_ip", "legal_rights"];
+
+    container.innerHTML = "";
+
+    categoryIds.forEach((catId) => {
+      const score = categoryScores[catId] || 0;
+      const topRisk = pickTopRiskForCategory(allRisks, catId);
+
+      // If there's truly nothing in this category, skip for now
+      if (!topRisk && score <= 0) {
+        return;
+      }
+
+      const card = document.createElement("div");
+      card.className = "scribbit-category-card";
+
+      const header = document.createElement("div");
+      header.className = "scribbit-category-header";
+
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "scribbit-category-name";
+      nameSpan.textContent = categoryDisplayName(catId);
+
+      const levelClass = categoryScoreToLevel(score);
+      const levelSpan = document.createElement("span");
+      levelSpan.className = "scribbit-category-level scribbit-category-level-" + levelClass;
+      levelSpan.textContent =
+        levelClass === "high"
+          ? "High"
+          : levelClass === "med"
+          ? "Medium"
+          : levelClass === "low"
+          ? "Low"
+          : "None";
+
+      header.appendChild(nameSpan);
+      header.appendChild(levelSpan);
+
+      const barWrap = document.createElement("div");
+      barWrap.className = "scribbit-category-bar";
+
+      const barFill = document.createElement("div");
+      barFill.className = "scribbit-category-bar-fill scribbit-category-bar-" + levelClass;
+      const width = Math.max(0, Math.min(100, score));
+      barFill.style.width = width + "%";
+
+      barWrap.appendChild(barFill);
+
+      card.appendChild(header);
+      card.appendChild(barWrap);
+
+      if (topRisk) {
+        const riskBlock = document.createElement("div");
+        riskBlock.className = "scribbit-category-risk-block";
+
+        const titleRow = document.createElement("div");
+        titleRow.className = "scribbit-category-risk-title-row";
+
+        const riskTitle = document.createElement("span");
+        riskTitle.className = "scribbit-risk-title";
+        riskTitle.textContent = topRisk.title || topRisk.label || "Key risk";
+
+        const whyWrapper = document.createElement("div");
+        whyWrapper.className = "scribbit-risk-why-wrapper";
+
+        const whyBtn = document.createElement("button");
+        whyBtn.className = "scribbit-risk-why";
+        whyBtn.type = "button";
+        whyBtn.textContent = "Why is this risky?";
+
+        const tooltip = document.createElement("div");
+        tooltip.className = "scribbit-risk-tooltip";
+        tooltip.textContent =
+          summarizeEvidence(topRisk) || "No additional details available.";
+
+        whyWrapper.appendChild(whyBtn);
+        whyWrapper.appendChild(tooltip);
+
+        titleRow.appendChild(riskTitle);
+        titleRow.appendChild(whyWrapper);
+
+        riskBlock.appendChild(titleRow);
+        card.appendChild(riskBlock);
+      }
+
+      container.appendChild(card);
+    });
   }
 
   /**********************************************************
@@ -244,56 +398,23 @@
     panel.style.display = "block";
 
     const levelBadge = document.getElementById("scribbit-panel-level");
-    const scoreEl = document.getElementById("scribbit-panel-score");
-    const listEl = document.getElementById("scribbit-panel-risks");
+    const summaryEl = document.getElementById("scribbit-panel-summary");
+    const categoryList = document.getElementById("scribbit-category-list");
 
-    // Update level & score
-    levelBadge.textContent = result.overallLevel;
-    scoreEl.textContent = "Score: " + result.overallScore;
+    // Legacy level badge (still uses overallLevel from engine)
+    if (levelBadge && result.overallLevel) {
+      levelBadge.textContent = result.overallLevel;
+    }
 
-    // Update risks (top 3 for now)
-    listEl.innerHTML = "";
-    result.risks.slice(0, 3).forEach((risk) => {
-      const li = document.createElement("li");
-      li.className = "scribbit-panel-risk-item";
+    // Summary line from riskScore
+    if (summaryEl) {
+      summaryEl.textContent = formatOverallSummary(result);
+    }
 
-      const row = document.createElement("div");
-      row.className = "scribbit-risk-row";
-
-      const labelSpan = document.createElement("span");
-      labelSpan.className = "scribbit-risk-label";
-      labelSpan.textContent = risk.label;
-
-      const whyBtn = document.createElement("button");
-      whyBtn.className = "scribbit-risk-why";
-      whyBtn.type = "button";
-      whyBtn.textContent = "Why?";
-
-      const evidenceDiv = document.createElement("div");
-      evidenceDiv.className = "scribbit-risk-evidence";
-
-      const summary = summarizeEvidence(risk);
-      evidenceDiv.textContent = summary || "No additional details available.";
-      // hidden by default; CSS controls display based on .visible
-      // but we only toggle the class in JS
-
-      // Toggle evidence on click
-      function toggleEvidence(e) {
-        e.stopPropagation();
-        evidenceDiv.classList.toggle("visible");
-      }
-
-      labelSpan.addEventListener("click", toggleEvidence);
-      whyBtn.addEventListener("click", toggleEvidence);
-
-      row.appendChild(labelSpan);
-      row.appendChild(whyBtn);
-
-      li.appendChild(row);
-      li.appendChild(evidenceDiv);
-
-      listEl.appendChild(li);
-    });
+    // Render categories + top risks
+    if (categoryList) {
+      renderCategories(categoryList, result);
+    }
 
     // On first appearance for this host, decide expanded vs collapsed
     if (firstTimeShow) {
