@@ -1,36 +1,35 @@
 /* ui/panel.css */
-/* Scribbit Fairness Scanner – On-page Panel Styles */
+/* Scribbit Fairness Scanner - On-page Panel Styles (Risk v2) */
 
 #scribbit-fairness-panel {
   position: fixed;
-  bottom: 16px;
   right: 16px;
-  max-width: 280px;
-  background: #111827;
-  color: #f9fafb;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 12px;
-  border-radius: 10px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+  bottom: 16px;
   z-index: 2147483647;
+  max-width: 320px;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  color: #0f172a;
+  background: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.25);
   overflow: hidden;
-  display: none; /* hidden until we detect risks */
 }
 
-/* Collapsed state */
+/* Collapsed state: keep header visible, hide body */
 #scribbit-fairness-panel.collapsed .scribbit-panel-body {
   display: none;
 }
 
-/* HEADER ------------------------------------------------------------ */
+/* Header */
 
 .scribbit-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 6px 8px;
-  border-bottom: 1px solid rgba(249, 250, 251, 0.08);
-  background: #020617;
+  background: #0f172a;
+  color: #f9fafb;
   cursor: pointer;
 }
 
@@ -40,178 +39,288 @@
   gap: 6px;
 }
 
+.scribbit-panel-logo {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+}
+
+.scribbit-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
 .scribbit-panel-header-right {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.scribbit-panel-logo {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
-.scribbit-panel-title {
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  font-size: 10px;
-  opacity: 0.9;
-}
-
 .scribbit-panel-badge {
+  display: inline-block;
   padding: 2px 6px;
   border-radius: 999px;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
-}
-
-/* LEVEL COLORS ------------------------------------------------------- */
-
-.scribbit-level-low,
-#scribbit-panel-level.LOW {
-  background: rgba(22, 163, 74, 0.2);
-  color: #bbf7d0;
-}
-
-.scribbit-level-medium,
-#scribbit-panel-level.MEDIUM {
-  background: rgba(234, 179, 8, 0.2);
-  color: #facc15;
-}
-
-.scribbit-level-high,
-#scribbit-panel-level.HIGH {
-  background: rgba(239, 68, 68, 0.25);
-  color: #fecaca;
-}
-
-/* CLOSE BUTTON ------------------------------------------------------- */
-
-.scribbit-panel-close {
-  background: transparent;
-  border: none;
-  color: #9ca3af;
-  font-size: 14px;
-  line-height: 1;
-  padding: 0 4px;
-  cursor: pointer;
-}
-
-.scribbit-panel-close:hover {
+  background: rgba(148, 163, 184, 0.3);
   color: #e5e7eb;
 }
 
-/* BODY --------------------------------------------------------------- */
+.scribbit-panel-close {
+  border: none;
+  background: transparent;
+  color: #e5e7eb;
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.scribbit-panel-close:hover {
+  color: #ffffff;
+}
+
+/* Body */
 
 .scribbit-panel-body {
   padding: 8px 10px 10px;
+  background: #f9fafb;
 }
 
-.scribbit-panel-score {
-  font-size: 11px;
-  margin-bottom: 6px;
-  opacity: 0.9;
+.scribbit-panel-summary {
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: #0f172a;
 }
 
-.scribbit-panel-risks {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* Categories list */
+
+.scribbit-category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 
-.scribbit-panel-risk-item {
-  padding: 4px 0;
-  border-top: 1px solid rgba(148, 163, 184, 0.2);
+.scribbit-category-card {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 6px 8px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
 }
 
-.scribbit-panel-risk-item:first-child {
-  border-top: none;
-}
+/* Category header */
 
-.scribbit-panel-risk-item.scribbit-empty {
-  font-style: italic;
-  opacity: 0.7;
-}
-
-/* RISK DOT COLORS ---------------------------------------------------- */
-
-.scribbit-risk-label {
+.scribbit-category-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
+  margin-bottom: 4px;
 }
 
-.scribbit-severity-dot {
-  width: 8px;
-  height: 8px;
+.scribbit-category-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.scribbit-category-level {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
   border-radius: 999px;
-  display: inline-block;
+  text-transform: uppercase;
 }
 
-.scribbit-severity-low {
+.scribbit-category-level-none {
+  background: rgba(148, 163, 184, 0.2);
+  color: #6b7280;
+}
+
+.scribbit-category-level-low {
+  background: rgba(22, 163, 74, 0.15);
+  color: #16a34a;
+}
+
+.scribbit-category-level-med {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+}
+
+.scribbit-category-level-high {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+/* Category bar */
+
+.scribbit-category-bar {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.25);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.scribbit-category-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.2s ease-out;
+}
+
+.scribbit-category-bar-none {
+  background: transparent;
+}
+
+.scribbit-category-bar-low {
   background: #22c55e;
 }
 
-.scribbit-severity-medium {
+.scribbit-category-bar-med {
   background: #eab308;
 }
 
-.scribbit-severity-high {
+.scribbit-category-bar-high {
   background: #ef4444;
 }
 
-/* MUTE CONTROLS ------------------------------------------------------ */
+/* Risk block inside category */
+
+.scribbit-category-risk-block {
+  margin-top: 2px;
+}
+
+.scribbit-category-risk-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.scribbit-risk-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #111827;
+}
+
+/* "Why is this risky?" */
+
+.scribbit-risk-why-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.scribbit-risk-why {
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  color: #0ea5e9;
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.scribbit-risk-why:hover {
+  text-decoration: underline;
+}
+
+/* Tooltip */
+
+.scribbit-risk-tooltip {
+  position: absolute;
+  right: 0;
+  bottom: 115%;
+  max-width: 260px;
+  background: #0f172a;
+  color: #f9fafb;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.35);
+  display: none;
+  z-index: 2147483647;
+}
+
+/* little arrow */
+.scribbit-risk-tooltip::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  right: 8px;
+  border-width: 5px;
+  border-style: solid;
+  border-color: #0f172a transparent transparent transparent;
+}
+
+/* Show tooltip on hover of wrapper */
+.scribbit-risk-why-wrapper:hover .scribbit-risk-tooltip {
+  display: block;
+}
+
+/* Mute row */
 
 .scribbit-panel-mute-row {
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(30, 64, 175, 0.5);
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .scribbit-panel-mute-toggle {
-  align-self: flex-start;
-  background: transparent;
   border: none;
-  padding: 0;
+  border-radius: 999px;
+  padding: 4px 10px;
   font-size: 11px;
-  color: #60a5fa;
   cursor: pointer;
+  background: #0f172a;
+  color: #f9fafb;
 }
 
 .scribbit-panel-mute-toggle:hover {
-  text-decoration: underline;
+  background: #1f2937;
 }
+
+/* Mute options dropdown */
 
 .scribbit-panel-mute-options {
   display: none;
   gap: 4px;
-  flex-wrap: wrap;
 }
 
 .scribbit-panel-mute-options.visible {
   display: flex;
 }
 
-.scribbit-panel-mute-option,
-.scribbit-panel-mute-options button {
-  border: 1px solid rgba(148, 163, 184, 0.5);
-  background: rgba(15, 23, 42, 0.85);
-  color: #e5e7eb;
+.scribbit-panel-mute-option {
+  border: none;
   border-radius: 999px;
+  padding: 3px 7px;
   font-size: 10px;
-  padding: 2px 6px;
   cursor: pointer;
+  background: #e5e7eb;
+  color: #111827;
 }
 
-.scribbit-panel-mute-option:hover,
-.scribbit-panel-mute-options button:hover {
-  background: rgba(59, 130, 246, 0.5);
-  border-color: rgba(59, 130, 246, 0.8);
+.scribbit-panel-mute-option:hover {
+  background: #d1d5db;
+}
+
+/* Responsive-ish */
+
+@media (max-width: 480px) {
+  #scribbit-fairness-panel {
+    right: 8px;
+    left: 8px;
+    max-width: none;
+  }
 }
