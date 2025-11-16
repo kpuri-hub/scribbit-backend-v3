@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Scribbit Fairness Scanner",
-  "description": "Real-time scanning for refund traps, hidden fees, DCC/FX markups, unfair terms, and rights you may be giving up.",
-  "version": "0.1.0",
+  "description": "Real-time scanning for refund traps, hidden fees, DCC/FX markups, unfair terms, and personal data risks.",
+  "version": "0.2.0",
 
   "icons": {
     "16": "assets/icons/icon16.png",
