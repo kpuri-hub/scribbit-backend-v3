@@ -1,226 +1,201 @@
-/* ui/panel.css */
-/* Scribbit Fairness Scanner - On-page Panel Styles */
+/* ui/popup.css */
+/* Scribbit Fairness Scanner - Popup UI (Risk v2) */
 
-#scribbit-fairness-panel {
-  position: fixed;
-  right: 16px;
-  bottom: 16px;
-  z-index: 2147483647;
-  max-width: 320px;
+body {
+  margin: 0;
+  padding: 0;
+  background: #020617;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 13px;
-  color: #0f172a;
-  background: #ffffff;
-  border-radius: 10px;
-  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.25);
-  overflow: hidden;
+  color: #f9fafb;
+  width: 280px;
 }
 
-/* Collapsed state: keep header visible, hide body */
-#scribbit-fairness-panel.collapsed .scribbit-panel-body {
-  display: none;
+#popup-root {
+  padding: 10px 12px 12px;
 }
 
 /* Header */
 
-.scribbit-panel-header {
+.popup-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 8px;
-  background: #0f172a;
-  color: #f9fafb;
-  cursor: pointer;
-}
-
-.scribbit-panel-header-left {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.scribbit-panel-logo {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
-}
-
-.scribbit-panel-title {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
-.scribbit-panel-header-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.scribbit-panel-badge {
-  display: inline-block;
-  padding: 2px 6px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  background: rgba(148, 163, 184, 0.2);
-  color: #e5e7eb;
-}
-
-.scribbit-panel-close {
-  border: none;
-  background: transparent;
-  color: #e5e7eb;
-  font-size: 14px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 0 4px;
-}
-
-.scribbit-panel-close:hover {
-  color: #fff;
-}
-
-/* Body */
-
-.scribbit-panel-body {
-  padding: 8px 10px 10px;
-  background: #f9fafb;
-}
-
-.scribbit-panel-score {
-  font-size: 12px;
-  font-weight: 500;
-  margin-bottom: 6px;
-  color: #0f172a;
-}
-
-/* Risks list */
-
-.scribbit-panel-risks {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 8px;
-}
-
-.scribbit-panel-risk-item {
-  padding: 6px 0;
-  border-top: 1px solid rgba(148, 163, 184, 0.25);
-  font-size: 12px;
-  color: #111827;
-}
-
-.scribbit-panel-risk-item:first-child {
-  border-top: none;
-}
-
-.scribbit-panel-risk-item.scribbit-empty {
-  font-style: italic;
-  opacity: 0.7;
-}
-
-/* Risk row + "Why?" */
-
-.scribbit-risk-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 6px;
-}
-
-.scribbit-risk-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: #111827;
-  cursor: pointer;
-}
-
-.scribbit-risk-why {
-  border: none;
-  background: transparent;
-  font-size: 11px;
-  color: #0ea5e9;
-  cursor: pointer;
-  padding: 0;
-  margin: 0;
-  white-space: nowrap;
-}
-
-.scribbit-risk-why:hover {
-  text-decoration: underline;
-}
-
-/* Evidence block */
-
-.scribbit-risk-evidence {
-  margin-top: 4px;
-  font-size: 11px;
-  color: #4b5563;
-  line-height: 1.3;
-  display: none;
-}
-
-.scribbit-risk-evidence.visible {
-  display: block;
-}
-
-/* Mute row */
-
-.scribbit-panel-mute-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  margin-top: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
 }
 
-.scribbit-panel-mute-toggle {
-  border: none;
-  border-radius: 999px;
-  padding: 4px 10px;
+.popup-logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+
+.popup-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.popup-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.popup-subtitle {
   font-size: 11px;
-  cursor: pointer;
-  background: #0f172a;
-  color: #f9fafb;
+  color: #9ca3af;
 }
 
-.scribbit-panel-mute-toggle:hover {
-  background: #1f2937;
+/* Overall section */
+
+.popup-overall {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 8px;
+  margin-bottom: 8px;
 }
 
-/* Mute options dropdown */
+.popup-overall-level {
+  font-size: 12px;
+  font-weight: 500;
+}
 
-.scribbit-panel-mute-options {
-  display: none;
+.popup-overall-score {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+/* Categories */
+
+.popup-categories {
+  margin-top: 4px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
   gap: 4px;
 }
 
-.scribbit-panel-mute-options.visible {
+.popup-category-row {
   display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.scribbit-panel-mute-option {
-  border: none;
+.popup-category-label {
+  font-size: 11px;
+  color: #e5e7eb;
+}
+
+.popup-category-bar {
+  position: relative;
+  width: 100%;
+  height: 4px;
   border-radius: 999px;
-  padding: 3px 7px;
-  font-size: 10px;
-  cursor: pointer;
-  background: #e5e7eb;
-  color: #111827;
+  background: rgba(31, 41, 55, 0.9);
+  overflow: hidden;
 }
 
-.scribbit-panel-mute-option:hover {
-  background: #d1d5db;
+.popup-category-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.2s ease-out;
 }
 
-/* Responsive-ish: reduce width on very small screens */
+.popup-category-bar-none {
+  background: transparent;
+}
 
-@media (max-width: 480px) {
-  #scribbit-fairness-panel {
-    right: 8px;
-    left: 8px;
-    max-width: none;
-  }
+.popup-category-bar-low {
+  background: #22c55e;
+}
+
+.popup-category-bar-med {
+  background: #eab308;
+}
+
+.popup-category-bar-high {
+  background: #ef4444;
+}
+
+/* Risks */
+
+.popup-risks {
+  border-top: 1px solid rgba(148, 163, 184, 0.3);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+.popup-risks-empty {
+  font-size: 11px;
+  color: #9ca3af;
+  line-height: 1.4;
+}
+
+.popup-risk-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.7);
+}
+
+.popup-risk-item:first-child {
+  border-top: none;
+}
+
+.popup-risk-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.popup-risk-dot-low {
+  background: #22c55e;
+}
+
+.popup-risk-dot-med {
+  background: #eab308;
+}
+
+.popup-risk-dot-high {
+  background: #ef4444;
+}
+
+.popup-risk-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.popup-risk-title {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.popup-risk-description {
+  font-size: 11px;
+  color: #d1d5db;
+  line-height: 1.4;
+}
+
+/* Footer */
+
+.popup-footer {
+  margin-top: 8px;
+  text-align: left;
+}
+
+.help-link {
+  font-size: 11px;
+  color: #38bdf8;
+  text-decoration: none;
+}
+
+.help-link:hover {
+  text-decoration: underline;
 }
