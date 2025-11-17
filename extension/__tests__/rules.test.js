@@ -7,7 +7,7 @@ function makeTestCard(id, category = "financial", severity = "MED") {
     category,
     title: id,
     defaultDescription: `Test card: ${id}`,
-    severity, // note: we use uppercase to match your engine behavior
+    severity, // we use uppercase to match the way your engine tends to represent severity
     autoPopupWorthy: false,
   };
 }
