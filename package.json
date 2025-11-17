@@ -2,7 +2,6 @@
   "name": "scribbit-extension",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "scripts": {
     "test": "jest --runInBand",
     "test:watch": "jest --watchAll"
