@@ -2,8 +2,8 @@
 // Scribbit Fairness Scanner - On-page Panel (Risk v2 UI)
 //
 // Behaviour:
-// - Only shows if there is at least 1 risk overall
-// - ALWAYS renders all 4 categories (Financial, Data, Content, Legal)
+// - ONLY shows if there is at least 1 risk overall (no "flash on every page")
+// - ALWAYS renders all 4 categories (Financial, Data, Content, Legal) when visible
 // - Each category shows: name, severity level, bar, and # of issues
 // - Clicking a category header toggles expand/collapse
 // - Each risk card shows title + "Why is this risky?" tooltip with description
@@ -126,6 +126,8 @@
 
     panel = document.createElement("div");
     panel.id = PANEL_ID;
+    // Start hidden; we'll show it explicitly in updatePanel when there are risks
+    panel.style.display = "none";
 
     // Header
     const header = document.createElement("div");
@@ -327,24 +329,22 @@
     const riskResult = normalizeRiskResult(riskResultRaw);
     console.log("[Scribbit] Panel received riskResult:", riskResult);
 
-    if (!riskResult || !Array.isArray(riskResult.risks)) {
-      const existing = document.getElementById(PANEL_ID);
-      if (existing) existing.style.display = "none";
+    const existingPanel = document.getElementById(PANEL_ID);
+
+    // If no valid risks, hide existing panel (if any) and bail out.
+    if (!riskResult || !Array.isArray(riskResult.risks) || riskResult.risks.length === 0) {
+      if (existingPanel) {
+        existingPanel.style.display = "none";
+      }
       return;
     }
 
-    const globalRisks = riskResult.risks || [];
-    if (globalRisks.length === 0) {
-      const existing = document.getElementById(PANEL_ID);
-      if (existing) existing.style.display = "none";
-      return;
-    }
-
+    // At this point we KNOW there are risks → create/show the panel.
     injectStylesheet();
-    const panel = createPanelShell();
-    panel.style.display = "block";
+    const panelEl = existingPanel || createPanelShell();
+    panelEl.style.display = "block";
 
-    const summaryEl = panel.querySelector("#scribbit-panel-summary");
+    const summaryEl = panelEl.querySelector("#scribbit-panel-summary");
     const overallLevel = String(riskResult.overallLevel || "").toUpperCase();
     const riskScore =
       typeof riskResult.riskScore === "number" ? riskResult.riskScore : 0;
@@ -361,7 +361,7 @@
       }
     }
 
-    const categoryList = panel.querySelector("#scribbit-category-list");
+    const categoryList = panelEl.querySelector("#scribbit-category-list");
     if (!categoryList) return;
 
     categoryList.innerHTML = "";
@@ -382,8 +382,9 @@
     // Guard: don't run in iframes inside extension pages, etc.
     if (window.top !== window.self) return;
 
-    injectStylesheet();
-    createPanelShell();
+    // We DO NOT create the panel shell here.
+    // We only subscribe to messaging and wait for risk data.
+    // The panel will be created/shown lazily in updatePanel() ONLY if there are risks.
 
     if (!window.ScribbitMessaging) {
       console.warn("[Scribbit] ScribbitMessaging not available in panel.js.");
