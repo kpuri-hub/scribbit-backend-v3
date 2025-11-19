@@ -50,12 +50,32 @@
       autoPopupWorthy: false
     },
 
+    ultra_short_refund_window: {
+      id: "ultra_short_refund_window",
+      category: "financial",
+      title: "Ultra-Short Cancellation Window",
+      defaultDescription:
+        "Cancellation or refund is only allowed within a very short period (typically 24–72 hours).",
+      severity: "high",
+      autoPopupWorthy: true
+    },
+
     short_refund_or_return_window: {
       id: "short_refund_or_return_window",
       category: "financial",
       title: "Short Refund / Return Window",
       defaultDescription:
-        "You only have a limited time after purchase or delivery to cancel or return for a refund.",
+        "You only have a limited time (up to about 7 days) after purchase or before arrival to cancel or return for a refund.",
+      severity: "med",
+      autoPopupWorthy: true
+    },
+
+    delayed_refund_processing: {
+      id: "delayed_refund_processing",
+      category: "financial",
+      title: "Slow Refund Processing",
+      defaultDescription:
+        "Refunds may take a long time to be processed (for example, 30–60 days or more) after your request is approved.",
       severity: "med",
       autoPopupWorthy: true
     },
@@ -96,6 +116,16 @@
       title: "Auto-Renewing Subscription",
       defaultDescription:
         "Your subscription may renew automatically and charge you again unless you cancel in time.",
+      severity: "med",
+      autoPopupWorthy: true
+    },
+
+    trial_converts_to_paid_subscription: {
+      id: "trial_converts_to_paid_subscription",
+      category: "financial",
+      title: "Trial Converts to Paid Subscription",
+      defaultDescription:
+        "A free or discounted trial will automatically convert into a paid, recurring subscription unless you cancel before the trial ends.",
       severity: "med",
       autoPopupWorthy: true
     },

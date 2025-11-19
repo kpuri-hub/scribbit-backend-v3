@@ -1,126 +1,75 @@
 // content/riskEngine.js
-// Scribbit Fairness Scanner - Risk Engine (robust Risk v2 scoring)
+// Scribbit Fairness Scanner - Risk Engine (Risk Model v2 compatible)
 //
-// - Keeps legacy fields: overallScore, overallLevel, risks
-// - Adds Risk v2 fields: riskScore (0–100), categoryScores, hasMeaningfulContent
-// - Does NOT rely on RiskModel.computeCategoryScores, so it's robust even if
-//   some risk objects are missing category.
+// - Consumes ScribbitRules.evaluateAll(snapshot) for detection
+// - Uses RiskModel helpers if available, falls back to local logic otherwise
+// - Produces:
+//     {
+//       risks: [],
+//       categoryScores: { financial, data_privacy, content_ip, legal_rights },
+//       riskScore: 0–100,
+//       overallLevel: "LOW" | "MEDIUM" | "HIGH",
+//       overallScore: same as riskScore (legacy),
+//       hasMeaningfulContent: boolean,
+//       pageMode: "content-rich" | "low-content" | "auth"
+//     }
+//
+// Also logs the full result for debugging.
 
 const ScribbitRiskEngine = (() => {
   const LEVELS = {
     LOW: "LOW",
     MEDIUM: "MEDIUM",
-    HIGH: "HIGH"
+    HIGH: "HIGH",
   };
 
   const RiskModel = window.ScribbitRiskModel || {};
+  const Rules = window.ScribbitRules || null;
 
   /************************************************************
-   * Legacy scoring (for existing UI)
-   ************************************************************/
-  function computeLegacyOverallScore(risks) {
-    if (!risks || risks.length === 0) return 0;
-    const total = risks.reduce((sum, r) => sum + (r.severityScore || 0), 0);
-    return Math.min(total, 10);
-  }
-
-  function scoreToLevel(score) {
-    if (score === 0) return LEVELS.LOW;
-    if (score <= 3) return LEVELS.LOW;
-    if (score <= 6) return LEVELS.MEDIUM;
-    return LEVELS.HIGH;
-  }
-
-  /************************************************************
-   * Helpers for Risk v2 scoring
+   * 1. Category scoring (local fallback)
    ************************************************************/
 
-  function severityToScore(sev, severityScoreLegacy) {
-    if (sev) {
-      const s = String(sev).toLowerCase();
-      if (s === "high") return 80;
-      if (s === "med" || s === "medium") return 50;
-      if (s === "low") return 25;
+  function severityToPointsFromRisk(risk) {
+    // Prefer explicit severityScore if present.
+    if (typeof risk.severityScore === "number") {
+      // Map legacy scores 1/2/3 → 25/50/80
+      if (risk.severityScore >= 3) return 80;
+      if (risk.severityScore >= 2) return 50;
+      if (risk.severityScore >= 1) return 25;
+      return 0;
     }
-    // Fallback based on old numeric severityScore
-    if (typeof severityScoreLegacy === "number") {
-      if (severityScoreLegacy >= 3) return 80;
-      if (severityScoreLegacy === 2) return 50;
-      if (severityScoreLegacy === 1) return 25;
-    }
+
+    const sevStr = String(risk.severity || "").toUpperCase();
+    if (sevStr === "HIGH") return 80;
+    if (sevStr === "MEDIUM") return 50;
+    if (sevStr === "LOW") return 25;
     return 0;
   }
 
-  // Try to infer category from the risk object if category is missing.
-  function inferCategory(risk) {
-    if (!risk) return "financial"; // safe default
-
-    if (risk.category) return risk.category;
-
-    const title = (risk.title || risk.label || "").toLowerCase();
-    const tags = Array.isArray(risk.tags) ? risk.tags.join(" ").toLowerCase() : "";
-
-    const text = title + " " + tags;
-
-    // Financial
-    if (
-      /refund|fee|fees|price|pricing|charge|charges|currency|exchange|fx|dcc|subscription|auto-?renew/.test(
-        text
-      )
-    ) {
-      return "financial";
-    }
-
-    // Data privacy
-    if (
-      /data|privacy|tracking|cookie|cookies|personal information|location|gps|analytics|third[- ]parties/.test(
-        text
-      )
-    ) {
-      return "data_privacy";
-    }
-
-    // Content/IP
-    if (
-      /content|image|photo|photos|pictures|upload|uploads|license|licence|marketing|publicly/.test(
-        text
-      )
-    ) {
-      return "content_ip";
-    }
-
-    // Legal rights
-    if (
-      /arbitration|class action|lawsuit|liability|indemnity|jurisdiction|governing law|termination|suspend your account/.test(
-        text
-      )
-    ) {
-      return "legal_rights";
-    }
-
-    // Default bucket if nothing matched
-    return "financial";
-  }
-
   function computeCategoryScoresLocal(risks) {
-    const base = {
+    const scores = {
       financial: 0,
       data_privacy: 0,
       content_ip: 0,
-      legal_rights: 0
+      legal_rights: 0,
     };
 
-    if (!Array.isArray(risks)) return base;
+    if (!Array.isArray(risks)) return scores;
 
     for (const r of risks) {
-      const category = inferCategory(r);
-      const score = severityToScore(r.severity, r.severityScore);
-      if (score > base[category]) {
-        base[category] = score;
+      const cat = r.category || "financial";
+      const points = severityToPointsFromRisk(r);
+
+      if (typeof scores[cat] !== "number") {
+        scores[cat] = 0;
+      }
+      if (points > scores[cat]) {
+        scores[cat] = points;
       }
     }
 
-    return base;
+    return scores;
   }
 
   function computeGlobalRiskScoreLocal(categoryScores) {
@@ -129,20 +78,34 @@ const ScribbitRiskEngine = (() => {
     return Math.max.apply(null, values);
   }
 
+  function computeOverallLevel(riskScore) {
+    if (riskScore >= 70) return LEVELS.HIGH;
+    if (riskScore >= 40) return LEVELS.MEDIUM;
+    if (riskScore > 0) return LEVELS.LOW;
+    // For a 0 score we still treat as LOW but effectively "safe".
+    return LEVELS.LOW;
+  }
+
   /************************************************************
-   * Page mode / meaningful content (uses RiskModel if available)
+   * 2. Page mode / meaningful content
    ************************************************************/
+
   function computePageContextAndContent(snapshot) {
     const rawText = snapshot.textRaw || snapshot.textNormalized || "";
-    const url = snapshot.url || window.location.href || "";
+    const url =
+      snapshot.url ||
+      (typeof window !== "undefined" && window.location
+        ? window.location.href
+        : "");
     const textLength = rawText.length;
 
     let pageMode = "content-rich";
+
     if (typeof RiskModel.classifyPageMode === "function") {
       pageMode = RiskModel.classifyPageMode(url, textLength);
     } else {
-      // Fallback
-      const lower = url.toLowerCase();
+      // Fallback heuristics if RiskModel isn't available
+      const lower = String(url || "").toLowerCase();
       const looksAuth =
         lower.includes("/login") ||
         lower.includes("/signin") ||
@@ -151,73 +114,111 @@ const ScribbitRiskEngine = (() => {
         lower.includes("/register") ||
         lower.includes("/signup");
 
-      if (looksAuth) pageMode = "auth";
-      else if (textLength < 800) pageMode = "low-content";
-      else pageMode = "content-rich";
+      if (looksAuth) {
+        pageMode = "auth";
+      } else if (textLength < 800) {
+        pageMode = "low-content";
+      } else {
+        pageMode = "content-rich";
+      }
     }
 
-    let hasMeaningfulContent = true;
+    let hasMeaningfulContent = false;
+
     if (typeof RiskModel.computeHasMeaningfulContent === "function") {
       hasMeaningfulContent = RiskModel.computeHasMeaningfulContent(
         pageMode,
         textLength
       );
     } else {
-      hasMeaningfulContent = pageMode === "content-rich" || textLength >= 600;
+      // Fallback: treat content-rich pages as meaningful, others only if long enough
+      if (pageMode === "content-rich") {
+        hasMeaningfulContent = true;
+      } else {
+        hasMeaningfulContent = textLength >= 600 && pageMode !== "auth";
+      }
     }
 
-    return { pageMode, hasMeaningfulContent, textLength, url };
+    return { pageMode, hasMeaningfulContent };
   }
 
   /************************************************************
-   * MAIN ENTRY: Evaluate a page snapshot
+   * 3. Core evaluatePage
    ************************************************************/
+
   function evaluatePage(snapshot) {
-    if (!window.ScribbitRules) {
-      console.warn("[Scribbit] ScribbitRules not available in riskEngine.");
-      return {
-        overallScore: 0,
-        overallLevel: LEVELS.LOW,
-        risks: [],
-        riskScore: 0,
-        categoryScores: {
-          financial: 0,
-          data_privacy: 0,
-          content_ip: 0,
-          legal_rights: 0
-        },
-        hasMeaningfulContent: false
-      };
+    const safeSnapshot = snapshot && typeof snapshot === "object" ? snapshot : {};
+
+    // 1) Run all rules
+    let risks = [];
+    try {
+      if (Rules && typeof Rules.evaluateAll === "function") {
+        risks = Rules.evaluateAll(safeSnapshot) || [];
+      }
+    } catch (err) {
+      console.error("[Scribbit] Error evaluating rules:", err);
+      risks = [];
     }
 
-    const risks = ScribbitRules.evaluateAll(snapshot) || [];
-
-    // Legacy score for existing UI bits
-    const overallScore = computeLegacyOverallScore(risks);
-    const overallLevel = scoreToLevel(overallScore);
-
-    // Page context + content
-    const { pageMode, hasMeaningfulContent } =
-      computePageContextAndContent(snapshot);
-
-    // Robust local category scoring
-    const categoryScores = computeCategoryScoresLocal(risks);
-    const riskScore = computeGlobalRiskScoreLocal(categoryScores);
-
-    return {
-      overallScore,
-      overallLevel,
-      risks,
-      riskScore,
-      categoryScores,
-      hasMeaningfulContent,
-      pageMode
+    // 2) Compute category scores
+    let categoryScores = {
+      financial: 0,
+      data_privacy: 0,
+      content_ip: 0,
+      legal_rights: 0,
     };
+
+    try {
+      if (typeof RiskModel.computeCategoryScores === "function") {
+        categoryScores = RiskModel.computeCategoryScores(risks);
+      } else {
+        categoryScores = computeCategoryScoresLocal(risks);
+      }
+    } catch (err) {
+      console.error("[Scribbit] Error computing category scores:", err);
+      categoryScores = computeCategoryScoresLocal(risks);
+    }
+
+    // 3) Global risk score
+    let riskScore = 0;
+    try {
+      if (typeof RiskModel.computeGlobalRiskScore === "function") {
+        riskScore = RiskModel.computeGlobalRiskScore(categoryScores);
+      } else {
+        riskScore = computeGlobalRiskScoreLocal(categoryScores);
+      }
+    } catch (err) {
+      console.error("[Scribbit] Error computing global risk score:", err);
+      riskScore = computeGlobalRiskScoreLocal(categoryScores);
+    }
+
+    // 4) Overall level + page context
+    const { pageMode, hasMeaningfulContent } =
+      computePageContextAndContent(safeSnapshot);
+    const overallLevel = computeOverallLevel(riskScore);
+
+    const result = {
+      // New model fields
+      risks,
+      categoryScores,
+      riskScore,
+      overallLevel,
+      hasMeaningfulContent,
+      pageMode,
+
+      // Legacy alias
+      overallScore: riskScore,
+    };
+
+    // 🔍 Debug log so you can inspect in DevTools Console
+    console.log("[Scribbit] RiskEngine.evaluatePage result:", result);
+
+    return result;
   }
 
   return {
     LEVELS,
-    evaluatePage
+    evaluatePage,
   };
 })();
 

@@ -1,62 +1,58 @@
 <!-- ui/popup.html -->
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Scribbit Scan</title>
-  <link rel="stylesheet" href="popup.css" />
-</head>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Scribbit Scan</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
 
-<!-- FIX: allow larger, scrollable popup -->
-<body style="min-height: 350px; overflow-y: auto;">
-
-  <div id="popup-root">
-
-    <!-- Header -->
-    <header class="popup-header">
-      <img
-        src="../assets/icons/icon32.png"
-        alt="Scribbit logo"
-        class="popup-logo"
-      />
-      <div class="popup-header-text">
-        <div class="popup-title">Scribbit Scan</div>
-        <div class="popup-subtitle" id="popup-subtitle">
-          Scanning this page…
+  <body>
+    <div id="popup-root">
+      <!-- Header -->
+      <header class="popup-header">
+        <img
+          src="../assets/icons/icon32.png"
+          alt="Scribbit logo"
+          class="popup-logo"
+        />
+        <div class="popup-header-text">
+          <div class="popup-title">Scribbit Scan</div>
+          <div class="popup-subtitle" id="popup-subtitle">
+            Scanning this page…
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
 
-    <!-- Overall result -->
-    <section class="popup-overall" id="popup-overall">
-      <div class="popup-overall-level" id="popup-overall-level">Overall: –</div>
-      <div class="popup-overall-score" id="popup-overall-score">(0 / 100)</div>
-    </section>
+      <!-- Overall result -->
+      <section class="popup-overall" id="popup-overall">
+        <div class="popup-overall-level" id="popup-overall-level">
+          Overall: –
+        </div>
+        <div class="popup-overall-score" id="popup-overall-score">
+          (0 / 100)
+        </div>
+      </section>
 
-    <!-- Four risk categories -->
-    <section class="popup-categories" id="popup-categories">
-      <!-- Filled dynamically by popup.js -->
-    </section>
+      <!-- Categories -->
+      <section class="popup-categories" id="popup-categories"></section>
 
-    <!-- Top detected risks -->
-    <section class="popup-risks" id="popup-risks">
-      <!-- Filled dynamically by popup.js -->
-    </section>
+      <!-- Top risks -->
+      <section class="popup-risks" id="popup-risks"></section>
 
-    <!-- Footer -->
-    <footer class="popup-footer">
-      <a
-        href="https://scribbit.co"
-        target="_blank"
-        rel="noreferrer"
-        class="help-link"
-      >
-        Learn more about Scribbit
-      </a>
-    </footer>
+      <!-- Footer -->
+      <footer class="popup-footer">
+        <a
+          href="https://scribbit.co"
+          target="_blank"
+          rel="noreferrer"
+          class="help-link"
+        >
+          Learn more about Scribbit
+        </a>
+      </footer>
+    </div>
 
-  </div>
-
-  <script src="popup.js"></script>
-</body>
+    <script src="popup.js"></script>
+  </body>
 </html>

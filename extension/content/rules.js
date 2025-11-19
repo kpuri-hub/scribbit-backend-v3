@@ -53,14 +53,15 @@ const ScribbitRules = (() => {
       category: def.category,
       title: def.title,
       description: def.defaultDescription,
-      severity: sevLower, // "low" | "med" | "high"
+      // NOTE: sevLower is conceptually the normalized severity,
+      // but legacy engine expects sevUpper in severity field.
+      severity: sevUpper,
       autoPopupWorthy: !!def.autoPopupWorthy,
 
       // Legacy fields
       ruleId: def.id,
       label: def.title,
       severityScore: severityScoreLegacy,
-      severity: sevUpper,
       tags: [],
       evidence: Array.isArray(evidence) ? evidence : []
     };
@@ -98,7 +99,7 @@ const ScribbitRules = (() => {
   /************************************************************
    * Rule 1: Refund / cancellation language
    *  - non_refundable_or_final_sale
-   *  - short_refund_or_return_window
+   *  - short_refund_or_return_window (keyword-based)
    ************************************************************/
   const REFUND_KEYWORDS_RULE = {
     id: "refund_keywords_basic",
@@ -152,6 +153,135 @@ const ScribbitRules = (() => {
   };
 
   /************************************************************
+   * Rule 1b: Time-based refund / cancellation windows
+   *
+   * Distinguishes between:
+   *  - Ultra Short: <= 72 hours  → ultra_short_refund_window (HIGH)
+   *  - Short:      > 72h to 7d   → short_refund_or_return_window (MED)
+   *
+   * Only fires when cancellation/refund context is present.
+   ************************************************************/
+  const REFUND_SHORT_WINDOW_RULE = {
+    id: "refund_short_window_time_based",
+
+    evaluate(snapshot) {
+      const text = snapshot.textNormalized || "";
+      if (!text) return null;
+
+      const raw = snapshot.textRaw || "";
+      const lower = text.toLowerCase();
+
+      // Require cancellation / refund context so we don't flag random "7 days".
+      const contextKeywords = ["cancel", "cancellation", "refund", "refundable"];
+      const hasContext = contextKeywords.some((kw) => lower.includes(kw));
+      if (!hasContext) return null;
+
+      // Ultra-short windows: 24–72 hours
+      const ultraShortPhrases = [
+        "within 24 hours",
+        "within 48 hours",
+        "within 72 hours",
+        "24 hours of purchase",
+        "48 hours of purchase",
+        "72 hours of purchase",
+        "24 hours of booking",
+        "48 hours of booking",
+        "72 hours of booking"
+      ];
+
+      // Short windows: >72h up to 7 days
+      const shortPhrases = [
+        "within 7 days",
+        "up to 7 days",
+        "7 days of purchase",
+        "7 days of booking",
+        "7 days before arrival",
+        "7 days before check-in",
+        "seven days before arrival",
+        "seven days before check in"
+      ];
+
+      const hasUltraShort = ultraShortPhrases.some((p) => lower.includes(p));
+      const hasShort = shortPhrases.some((p) => lower.includes(p));
+
+      if (!hasUltraShort && !hasShort) return null;
+
+      // Decide which card to fire:
+      // Ultra Short has priority if both types appear.
+      let cardId;
+      let phrasesForEvidence;
+
+      if (hasUltraShort) {
+        cardId = "ultra_short_refund_window";
+        phrasesForEvidence = ultraShortPhrases;
+      } else {
+        cardId = "short_refund_or_return_window";
+        phrasesForEvidence = shortPhrases;
+      }
+
+      const evidence = findKeywordEvidence(text, raw, phrasesForEvidence, 3);
+      if (!evidence.length) return null;
+
+      return createRiskFromCard(cardId, evidence, {
+        tags: ["refunds", "cancellation", hasUltraShort ? "ultra_short" : "short_window"]
+      });
+    }
+  };
+
+  /************************************************************
+   * Rule 1c: Slow refund processing (30–60 days)
+   *  - delayed_refund_processing
+   ************************************************************/
+  const REFUND_DELAY_RULE = {
+    id: "refund_delay_processing_basic",
+
+    evaluate(snapshot) {
+      const text = snapshot.textNormalized || "";
+      if (!text) return null;
+
+      const raw = snapshot.textRaw || "";
+      const lower = text.toLowerCase();
+
+      // Require refund context (to avoid "30 days" in random contexts).
+      const contextKeywords = ["refund", "refunded", "refunds", "reimbursement", "credited"];
+      const hasContext = contextKeywords.some((kw) => lower.includes(kw));
+      if (!hasContext) return null;
+
+      // Phrases suggesting long refund processing times.
+      const delayPhrases = [
+        "within 30 days",
+        "within 45 days",
+        "within 60 days",
+        "30 days of the refund request",
+        "30 days of your refund request",
+        "30 days after your request",
+        "30 days after the request",
+        "30 to 60 days",
+        "30-60 days",
+        "30 – 60 days",
+        "may take 30 days",
+        "may take up to 30 days",
+        "may take up to 60 days",
+        "processing time of 30 days",
+        "processing time of 60 days",
+        "4-6 weeks",
+        "4 to 6 weeks",
+        "four to six weeks"
+      ];
+
+      const hasDelayLanguage = delayPhrases.some((p) => lower.includes(p));
+      if (!hasDelayLanguage) return null;
+
+      const evidence = findKeywordEvidence(text, raw, delayPhrases, 3);
+      if (!evidence.length) return null;
+
+      return createRiskFromCard("delayed_refund_processing", evidence, {
+        tags: ["refunds", "delay", "cashflow"]
+      });
+    }
+  };
+
+  /************************************************************
    * Rule 2: DCC / FX confusion
    *  - dcc_or_fx_markup
    ************************************************************/
@@ -171,9 +301,9 @@ const ScribbitRules = (() => {
       const dccPhrases = [
         "dynamic currency conversion",
         "dcc",
+        "pay in your card currency",
         "pay in your currency",
         "pay in card currency",
-        "pay in your card currency",
         "you will be charged in",
         "will be charged in",
         "charged in your currency",
@@ -288,6 +418,98 @@ const ScribbitRules = (() => {
 
       return createRiskFromCard("auto_renewing_subscription", evidence, {
         tags: ["subscription", "auto_renew"]
+      });
+    }
+  };
+
+  /************************************************************
+   * Rule 4b: Free trial that converts to paid, likely auto-renew
+   *  - trial_converts_to_paid_subscription
+   *
+   * Triggers when:
+   *  - We see "free trial" / "trial period" language, AND
+   *  - We also see clear signals of billing after trial:
+   *      - "after your trial", "at the end of the trial",
+   *      - plus "you will be charged", "you will be billed",
+   *      - or auto-renew style phrases ("renews automatically", "until you cancel").
+   ************************************************************/
+  const TRIAL_AUTO_RENEW_RULE = {
+    id: "trial_auto_renew_basic",
+
+    evaluate(snapshot) {
+      const text = snapshot.textNormalized || "";
+      if (!text) return null;
+
+      const raw = snapshot.textRaw || "";
+      const lower = text.toLowerCase();
+
+      const trialKeywords = [
+        "free trial",
+        "trial period",
+        "trial offer",
+        "start your trial",
+        "sign up for your trial",
+        "30-day trial",
+        "14-day trial",
+        "7-day trial",
+        "30 day trial",
+        "14 day trial",
+        "7 day trial"
+      ];
+
+      const trialContext = trialKeywords.some((kw) => lower.includes(kw));
+      if (!trialContext) return null;
+
+      const postTrialKeywords = [
+        "after your trial",
+        "after the trial",
+        "at the end of your trial",
+        "at the end of the trial",
+        "once the trial ends",
+        "once your trial ends",
+        "when your trial ends",
+        "after the trial period",
+        "after your trial period"
+      ];
+
+      const billingKeywords = [
+        "you will be charged",
+        "you will be billed",
+        "we will charge",
+        "we will bill",
+        "your card will be charged",
+        "your credit card will be charged",
+        "subscription will renew automatically",
+        "renews automatically",
+        "will renew automatically",
+        "will automatically renew",
+        "recurring subscription",
+        "recurring billing",
+        "recurring charges",
+        "charged on a recurring basis",
+        "until you cancel",
+        "unless you cancel"
+      ];
+
+      const hasPostTrial = postTrialKeywords.some((kw) => lower.includes(kw));
+      const hasBilling = billingKeywords.some((kw) => lower.includes(kw));
+
+      if (!hasPostTrial && !hasBilling) {
+        // We only want "trial converts to paid" if there is some hint
+        // that billing or recurring behaviour happens AFTER the trial.
+        return null;
+      }
+
+      const evidence = findKeywordEvidence(
+        text,
+        raw,
+        trialKeywords.concat(postTrialKeywords, billingKeywords),
+        3
+      );
+      if (!evidence.length) return null;
+
+      return createRiskFromCard("trial_converts_to_paid_subscription", evidence, {
+        tags: ["trial", "subscription", "auto_renew"]
       });
     }
   };
@@ -432,9 +654,12 @@ const ScribbitRules = (() => {
    ************************************************************/
   const ALL_RULES = [
     REFUND_KEYWORDS_RULE,
+    REFUND_SHORT_WINDOW_RULE,
+    REFUND_DELAY_RULE,
     DCC_MIXED_CURRENCY_RULE,
     ARBITRATION_CLAUSE_RULE,
     AUTO_RENEWAL_RULE,
+    TRIAL_AUTO_RENEW_RULE,
     UNILATERAL_CHANGES_RULE,
     HIDDEN_FEES_RULE
   ];

@@ -2,117 +2,178 @@
 // Scribbit Fairness Scanner - Browser Action Popup (Risk v2 UI)
 //
 // Shows:
-// - Overall risk score & level
-// - 4 tiny category bars (Financial, Data, Content, Legal)
-// - Top 3 detected risks across categories
-// - "No significant risks" state
+// - Overall risk level + score
+// - 4 category bars (Financial, Data, Content, Legal)
+// - Top 3 risks across all categories
+// - "No significant risks" / "No scan yet" states
+//
+// It is fully data-driven and compatible with multiple risk cards per category.
 
 (function () {
   const CATEGORY_ORDER = ["financial", "data_privacy", "content_ip", "legal_rights"];
 
-  function categoryDisplayName(categoryId) {
-    switch (categoryId) {
-      case "financial":
-        return "Financial Exposure";
-      case "data_privacy":
-        return "Personal Data & Privacy";
-      case "content_ip":
-        return "Content & Image Rights";
-      case "legal_rights":
-        return "Legal Rights & Control";
-      default:
-        return "Other";
+  const CATEGORY_LABELS = {
+    financial: "Financial",
+    data_privacy: "Personal Data",
+    content_ip: "Content & Image Rights",
+    legal_rights: "Legal Rights"
+  };
+
+  // ----- Helpers ------------------------------------------------------------
+
+  function severityFromScore(score) {
+    if (typeof score !== "number") return "none";
+    if (score >= 70) return "high";
+    if (score >= 40) return "med";
+    if (score > 0) return "low";
+    return "none";
+  }
+
+  function severityLabelFromOverall(level) {
+    const upper = String(level || "").toUpperCase();
+    if (upper === "HIGH") return "High";
+    if (upper === "MEDIUM") return "Medium";
+    if (upper === "LOW") return "Low";
+    return "Unknown";
+  }
+
+  function riskSeverityRank(risk) {
+    const sev = String(risk.severity || "").toLowerCase();
+    if (sev === "high") return 3;
+    if (sev === "med" || sev === "medium") return 2;
+    if (sev === "low") return 1;
+    return 0;
+  }
+
+  function getRiskDescription(risk) {
+    if (risk && risk.description) return risk.description;
+
+    try {
+      const model = window.ScribbitRiskModel;
+      if (model && model.RISK_CARDS && risk && risk.id) {
+        const card = model.RISK_CARDS[risk.id];
+        if (card && card.defaultDescription) return card.defaultDescription;
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    if (risk && Array.isArray(risk.evidence) && risk.evidence.length > 0) {
+      return risk.evidence[0];
+    }
+
+    return "No detailed explanation available.";
+  }
+
+  function normalizeRiskResult(maybe) {
+    if (!maybe) return null;
+    if (maybe.riskResult) return maybe.riskResult;
+    if (maybe.risk) return maybe.risk;
+    if (Array.isArray(maybe.risks) || maybe.categoryScores) return maybe;
+    if (maybe.payload) return normalizeRiskResult(maybe.payload);
+    return null;
+  }
+
+  // ----- DOM accessors ------------------------------------------------------
+
+  function $(id) {
+    return document.getElementById(id);
+  }
+
+  // ----- Rendering ----------------------------------------------------------
+
+  function renderOverall(riskResult) {
+    const subtitleEl = $("popup-subtitle");
+    const levelEl = $("popup-overall-level");
+    const scoreEl = $("popup-overall-score");
+
+    if (!riskResult) {
+      if (subtitleEl) subtitleEl.textContent = "No scan data yet for this page.";
+      if (levelEl) levelEl.textContent = "Overall: –";
+      if (scoreEl) scoreEl.textContent = "(0 / 100)";
+      return;
+    }
+
+    const overallLevel = severityLabelFromOverall(riskResult.overallLevel);
+    const riskScore =
+      typeof riskResult.riskScore === "number" ? riskResult.riskScore : 0;
+
+    if (subtitleEl) {
+      subtitleEl.textContent = "Scribbit scanned this page for hidden risks.";
+    }
+
+    if (levelEl) {
+      levelEl.textContent = `Overall: ${overallLevel}`;
+    }
+
+    if (scoreEl) {
+      scoreEl.textContent = `(${riskScore} / 100)`;
     }
   }
 
-  function categoryScoreToLevel(score) {
-    if (score <= 0) return "none";
-    if (score < 40) return "low";
-    if (score < 70) return "med";
-    return "high";
-  }
-
-  function severityOrderValue(sev) {
-    if (!sev) return 99;
-    const s = String(sev).toLowerCase();
-    if (s === "high") return 0;
-    if (s === "med" || s === "medium") return 1;
-    if (s === "low") return 2;
-    return 99;
-  }
-
-  function formatOverallSummary(result) {
-    const score = typeof result.riskScore === "number" ? result.riskScore : 0;
-    let level = "Low";
-    if (score >= 70) level = "High";
-    else if (score >= 40) level = "Medium";
-    return {
-      label: `Overall: ${level}`,
-      scoreText: `(${Math.round(score)} / 100)`
-    };
-  }
-
-  function pickTopRisks(risks, maxCount) {
-    if (!Array.isArray(risks)) return [];
-    const sorted = risks.slice().sort((a, b) => {
-      return severityOrderValue(a.severity) - severityOrderValue(b.severity);
-    });
-    return sorted.slice(0, maxCount);
-  }
-
-  function renderCategories(container, result) {
-    const categoryScores = result.categoryScores || {
-      financial: 0,
-      data_privacy: 0,
-      content_ip: 0,
-      legal_rights: 0
-    };
+  function renderCategories(riskResult) {
+    const container = $("popup-categories");
+    if (!container) return;
 
     container.innerHTML = "";
 
+    const categoryScores = (riskResult && riskResult.categoryScores) || {};
+
     CATEGORY_ORDER.forEach((catId) => {
       const score = categoryScores[catId] || 0;
-      const level = categoryScoreToLevel(score);
-      const width = Math.max(0, Math.min(100, score));
+      const sev = severityFromScore(score);
 
       const row = document.createElement("div");
       row.className = "popup-category-row";
 
       const label = document.createElement("div");
       label.className = "popup-category-label";
-      label.textContent = categoryDisplayName(catId);
+      label.textContent = CATEGORY_LABELS[catId] || catId;
 
-      const barWrap = document.createElement("div");
-      barWrap.className = "popup-category-bar";
+      const bar = document.createElement("div");
+      bar.className = "popup-category-bar";
 
-      const barFill = document.createElement("div");
-      barFill.className = "popup-category-bar-fill popup-category-bar-" + level;
-      barFill.style.width = width + "%";
+      const fill = document.createElement("div");
+      fill.className = "popup-category-bar-fill";
 
-      barWrap.appendChild(barFill);
+      if (sev === "high") fill.classList.add("popup-category-bar-high");
+      else if (sev === "med") fill.classList.add("popup-category-bar-med");
+      else if (sev === "low") fill.classList.add("popup-category-bar-low");
+      else fill.classList.add("popup-category-bar-none");
+
+      const clamped = Math.max(0, Math.min(100, score));
+      fill.style.width = `${clamped}%`;
+
+      bar.appendChild(fill);
       row.appendChild(label);
-      row.appendChild(barWrap);
+      row.appendChild(bar);
 
       container.appendChild(row);
     });
   }
 
-  function renderRisks(container, result) {
-    const risks = Array.isArray(result.risks) ? result.risks : [];
+  function renderTopRisks(riskResult) {
+    const container = $("popup-risks");
+    if (!container) return;
+
     container.innerHTML = "";
 
-    if (!risks.length || result.riskScore <= 0 || !result.hasMeaningfulContent) {
+    if (!riskResult || !Array.isArray(riskResult.risks) || riskResult.risks.length === 0) {
       const empty = document.createElement("div");
       empty.className = "popup-risks-empty";
-      empty.textContent =
-        "No significant risks detected on this page. For deeper detail, open the full terms or checkout screen.";
+      empty.textContent = "No significant issues detected on this page so far.";
       container.appendChild(empty);
       return;
     }
 
-    const topRisks = pickTopRisks(risks, 3);
+    // Sort by severity, HIGH → MED → LOW, but don't assume 1 per category.
+    const sorted = [...riskResult.risks].sort((a, b) => {
+      return riskSeverityRank(b) - riskSeverityRank(a);
+    });
 
-    topRisks.forEach((risk) => {
+    const top = sorted.slice(0, 3); // show top 3 for compact view
+
+    top.forEach((risk) => {
       const item = document.createElement("div");
       item.className = "popup-risk-item";
 
@@ -126,25 +187,14 @@
       else dot.classList.add("popup-risk-dot-low");
 
       const textWrap = document.createElement("div");
-      textWrap.className = "popup-risk-text";
 
       const title = document.createElement("div");
       title.className = "popup-risk-title";
-      title.textContent = risk.title || risk.label || "Risk";
+      title.textContent = risk.title || risk.label || "Untitled risk";
 
       const desc = document.createElement("div");
       desc.className = "popup-risk-description";
-
-      // Prefer the model description; if missing, fall back to first evidence snippet.
-      let description = risk.description || "";
-      if (!description && Array.isArray(risk.evidence) && risk.evidence.length) {
-        description = (risk.evidence[0] || "").trim();
-      }
-      if (!description) {
-        description = "Scribbit flagged how this clause is written.";
-      }
-
-      desc.textContent = description;
+      desc.textContent = getRiskDescription(risk);
 
       textWrap.appendChild(title);
       textWrap.appendChild(desc);
@@ -156,82 +206,55 @@
     });
   }
 
-  function renderFromResult(result) {
-    const subtitleEl = document.getElementById("popup-subtitle");
-    const overallLevelEl = document.getElementById("popup-overall-level");
-    const overallScoreEl = document.getElementById("popup-overall-score");
-    const categoriesEl = document.getElementById("popup-categories");
-    const risksEl = document.getElementById("popup-risks");
+  function renderAll(riskResultRaw) {
+    const riskResult = normalizeRiskResult(riskResultRaw);
+    console.log("[Scribbit] Popup received riskResult:", riskResult);
 
-    if (!result) {
-      if (subtitleEl) {
-        subtitleEl.textContent = "Waiting for Scribbit to scan this page…";
-      }
-      if (overallLevelEl) overallLevelEl.textContent = "Overall: –";
-      if (overallScoreEl) overallScoreEl.textContent = "(0 / 100)";
-      if (categoriesEl) categoriesEl.innerHTML = "";
-      if (risksEl) {
-        risksEl.innerHTML = "";
-        const msg = document.createElement("div");
-        msg.className = "popup-risks-empty";
-        msg.textContent =
-          "Scribbit hasn’t finished scanning this page yet. Try again in a moment.";
-        risksEl.appendChild(msg);
-      }
+    renderOverall(riskResult);
+    renderCategories(riskResult);
+    renderTopRisks(riskResult);
+  }
+
+  // ----- Messaging / bootstrap ---------------------------------------------
+
+  function requestStateFromBackground() {
+    if (!chrome || !chrome.tabs || !chrome.runtime) {
+      console.warn("[Scribbit] Popup: chrome.* APIs not available.");
+      renderAll(null);
       return;
     }
 
-    if (subtitleEl) {
-      subtitleEl.textContent = "Scan complete";
-    }
-
-    const summary = formatOverallSummary(result);
-    if (overallLevelEl) overallLevelEl.textContent = summary.label;
-    if (overallScoreEl) overallScoreEl.textContent = summary.scoreText;
-
-    if (categoriesEl) {
-      renderCategories(categoriesEl, result);
-    }
-
-    if (risksEl) {
-      renderRisks(risksEl, result);
-    }
-  }
-
-  function fetchAnalysisForActiveTab() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (!tabs || !tabs.length) {
-        renderFromResult(null);
-        return;
-      }
+      const activeTab = tabs && tabs[0];
+      const tabId = activeTab ? activeTab.id : undefined;
 
-      const tab = tabs[0];
-
-      // Ask background for the last known analysis for this tab.
       chrome.runtime.sendMessage(
         {
           type: "SCRIBBIT_POPUP_GET_STATE",
-          tabId: tab.id
+          tabId
         },
         (response) => {
           if (chrome.runtime.lastError) {
-            console.warn("[Scribbit] Popup message error:", chrome.runtime.lastError);
-            renderFromResult(null);
+            console.warn(
+              "[Scribbit] Popup: runtime error when requesting state:",
+              chrome.runtime.lastError
+            );
+            renderAll(null);
             return;
           }
 
-          if (!response || !response.ok || !response.riskResult) {
-            renderFromResult(null);
+          if (!response || response.ok === false) {
+            renderAll(null);
             return;
           }
 
-          renderFromResult(response.riskResult);
+          renderAll(response);
         }
       );
     });
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    fetchAnalysisForActiveTab();
+    requestStateFromBackground();
   });
 })();
