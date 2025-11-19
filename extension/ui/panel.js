@@ -6,7 +6,7 @@
 // - ALWAYS renders all 4 categories (Financial, Data, Content, Legal) when visible
 // - Each category shows: name, severity level, bar, and # of issues
 // - Clicking a category header toggles expand/collapse
-// - Each risk card shows title + "Why is this risky?" tooltip with description
+// - Panel has a close button that hides it and prevents it from reappearing
 // - UI is fully data-driven: no hardcoded card IDs
 //
 // It consumes the Risk Engine result object:
@@ -18,10 +18,6 @@
 //     hasMeaningfulContent,
 //     pageMode
 //   }
-//
-// Messaging:
-//   - On load, asks background for current risk via ScribbitMessaging.requestCurrentRisk()
-//   - Subscribes to live updates via ScribbitMessaging.onRiskUpdated()
 
 (function () {
   const PANEL_ID = "scribbit-fairness-panel";
@@ -34,6 +30,9 @@
     content_ip: "Content & Image Rights",
     legal_rights: "Legal Rights & Control"
   };
+
+  // Track if user manually closed the panel for this page
+  let panelManuallyHidden = false;
 
   // ----- Small helpers ------------------------------------------------------
 
@@ -75,7 +74,7 @@
         if (card && card.defaultDescription) return card.defaultDescription;
       }
     } catch (e) {
-      // ignore lookup failures, fall through to fallback
+      // ignore lookup failures
     }
 
     return "No detailed explanation available for this risk yet.";
@@ -84,7 +83,6 @@
   // Normalize whatever background sends us into a riskResult object
   function normalizeRiskResult(maybe) {
     if (!maybe) return null;
-    // Background might send { ok, riskResult } or { ok, risk } or just the object.
     if (maybe.riskResult) return maybe.riskResult;
     if (maybe.risk) return maybe.risk;
     if (Array.isArray(maybe.risks) || maybe.categoryScores) return maybe;
@@ -161,7 +159,9 @@
     closeBtn.setAttribute("type", "button");
     closeBtn.innerHTML = "×";
     closeBtn.title = "Hide Scribbit for this page";
+
     closeBtn.addEventListener("click", () => {
+      panelManuallyHidden = true;
       panel.style.display = "none";
     });
 
@@ -331,6 +331,12 @@
 
     const existingPanel = document.getElementById(PANEL_ID);
 
+    // If the user manually closed the panel for this page, never show it again.
+    if (panelManuallyHidden) {
+      if (existingPanel) existingPanel.style.display = "none";
+      return;
+    }
+
     // If no valid risks, hide existing panel (if any) and bail out.
     if (!riskResult || !Array.isArray(riskResult.risks) || riskResult.risks.length === 0) {
       if (existingPanel) {
@@ -379,24 +385,17 @@
   // ----- Init / wiring to messaging ----------------------------------------
 
   function init() {
-    // Guard: don't run in iframes inside extension pages, etc.
     if (window.top !== window.self) return;
-
-    // We DO NOT create the panel shell here.
-    // We only subscribe to messaging and wait for risk data.
-    // The panel will be created/shown lazily in updatePanel() ONLY if there are risks.
 
     if (!window.ScribbitMessaging) {
       console.warn("[Scribbit] ScribbitMessaging not available in panel.js.");
       return;
     }
 
-    // Subscribe to live updates from background
     window.ScribbitMessaging.onRiskUpdated((payload) => {
       updatePanel(payload);
     });
 
-    // Ask for the current risk snapshot on load
     window.ScribbitMessaging.requestCurrentRisk().then(
       (res) => {
         const normalized = normalizeRiskResult(
