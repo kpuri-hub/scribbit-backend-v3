@@ -1,26 +1,24 @@
 // extension/__tests__/feeParser.test.js
+// Tests for ScribbitFeeParser (currently a stub)
 
-require("../content/feeParser.js"); // attaches window.ScribbitFeeParser
+require("../content/feeParser.js");
 
-describe("ScribbitFeeParser", () => {
-  test("is attached to window", () => {
-    expect(window.ScribbitFeeParser).toBeDefined();
-    expect(typeof window.ScribbitFeeParser.parseFees).toBe("function");
+const ScribbitFeeParser = window.ScribbitFeeParser;
+
+describe("ScribbitFeeParser.parseFees", () => {
+  test("returns empty array for non-string or empty input", () => {
+    expect(ScribbitFeeParser.parseFees("")).toEqual([]);
+    expect(ScribbitFeeParser.parseFees(null)).toEqual([]);
+    expect(ScribbitFeeParser.parseFees(undefined)).toEqual([]);
   });
 
-  test("parseFees returns an array for normal text", () => {
-    const sample = `
-      Nightly rate: $100
-      Cleaning fee: $40
-      Service fee: $20
-    `;
-    const result = window.ScribbitFeeParser.parseFees(sample);
-    expect(Array.isArray(result)).toBe(true);
-  });
+  test("returns empty array for basic fee text (stub behavior)", () => {
+    const text =
+      "Room price $100 per night plus cleaning fee and service fee at checkout.";
+    const fees = ScribbitFeeParser.parseFees(text);
 
-  test("parseFees returns empty array for non-string input", () => {
-    expect(window.ScribbitFeeParser.parseFees(null)).toEqual([]);
-    expect(window.ScribbitFeeParser.parseFees(123)).toEqual([]);
+    // Stub currently does not parse fees; just ensure it's an array and empty.
+    expect(Array.isArray(fees)).toBe(true);
+    expect(fees.length).toBe(0);
   });
 });
-
