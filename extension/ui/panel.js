@@ -107,6 +107,43 @@
     return grouped;
   }
 
+  /**
+   * Take raw risk.evidence (whatever backend/engine gave us) and turn it into:
+   * - trimmed
+   * - deduped (case-insensitive)
+   * - max ~200 chars per line, cut at word boundary where possible
+   */
+  function normalizeEvidenceLines(rawLines) {
+    const result = [];
+    const seen = new Set();
+
+    if (!Array.isArray(rawLines)) return result;
+
+    for (const raw of rawLines) {
+      if (typeof raw !== "string") continue;
+      let txt = raw.replace(/\s+/g, " ").trim();
+      if (!txt) continue;
+
+      // Soft-truncate very long snippets
+      const MAX_LEN = 200;
+      if (txt.length > MAX_LEN) {
+        let cut = txt.slice(0, MAX_LEN - 1);
+        const lastSpace = cut.lastIndexOf(" ");
+        if (lastSpace > 40) {
+          cut = cut.slice(0, lastSpace);
+        }
+        txt = cut + "…";
+      }
+
+      const key = txt.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(txt);
+    }
+
+    return result;
+  }
+
   // ----- DOM creation / wiring ---------------------------------------------
 
   function injectStylesheet() {
@@ -298,7 +335,7 @@
         riskRow.appendChild(titleRow);
 
         // Evidence block (click risk row → toggle evidence)
-        const evidenceLines = Array.isArray(risk.evidence) ? risk.evidence : [];
+        const evidenceLines = normalizeEvidenceLines(risk.evidence);
         if (evidenceLines.length > 0) {
           const evidenceContainer = document.createElement("div");
           evidenceContainer.className = "scribbit-risk-evidence";
@@ -307,11 +344,8 @@
           evidenceList.className = "scribbit-risk-evidence-list";
 
           evidenceLines.forEach((line) => {
-            if (typeof line !== "string") return;
-            const trimmed = line.trim();
-            if (!trimmed) return;
             const li = document.createElement("li");
-            li.textContent = trimmed;
+            li.textContent = line;
             evidenceList.appendChild(li);
           });
 
