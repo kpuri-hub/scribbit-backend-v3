@@ -108,24 +108,51 @@
   }
 
   /**
-   * Take raw risk.evidence (whatever backend/engine gave us) and turn it into:
+   * Take raw risk.evidence and turn it into:
    * - trimmed
    * - deduped (case-insensitive)
-   * - max ~200 chars per line, cut at word boundary where possible
+   * - stripped of risk title / "Why is this risky?"
+   * - max ~1–2 concise sentences (~160 chars)
+   * - at most 2 bullets
    */
-  function normalizeEvidenceLines(rawLines) {
+  function buildEvidenceLines(risk) {
+    const rawLines = Array.isArray(risk && risk.evidence) ? risk.evidence : [];
     const result = [];
     const seen = new Set();
 
-    if (!Array.isArray(rawLines)) return result;
+    if (!rawLines.length) return result;
 
-    for (const raw of rawLines) {
-      if (typeof raw !== "string") continue;
-      let txt = raw.replace(/\s+/g, " ").trim();
-      if (!txt) continue;
+    const title = (risk && risk.title) ? String(risk.title) : "";
+
+    rawLines.forEach((raw) => {
+      if (typeof raw !== "string") return;
+      let txt = raw;
+
+      // Strip the risk title if it appears inside the snippet
+      if (title) {
+        try {
+          const reTitle = new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+          txt = txt.replace(reTitle, " ");
+        } catch (e) {
+          // if regex fails, skip stripping title
+        }
+      }
+
+      // Strip any "Why is this risky?" label fragments
+      txt = txt.replace(/why is this risky\??/gi, " ");
+
+      // Collapse whitespace
+      txt = txt.replace(/\s+/g, " ").trim();
+      if (!txt) return;
+
+      // Try to keep only the first sentence if it's reasonably long
+      const periodIndex = txt.indexOf(". ");
+      if (periodIndex > 40 && periodIndex < 200) {
+        txt = txt.slice(0, periodIndex + 1);
+      }
 
       // Soft-truncate very long snippets
-      const MAX_LEN = 200;
+      const MAX_LEN = 160;
       if (txt.length > MAX_LEN) {
         let cut = txt.slice(0, MAX_LEN - 1);
         const lastSpace = cut.lastIndexOf(" ");
@@ -136,12 +163,13 @@
       }
 
       const key = txt.toLowerCase();
-      if (seen.has(key)) continue;
+      if (seen.has(key)) return;
       seen.add(key);
       result.push(txt);
-    }
+    });
 
-    return result;
+    // At most 2 bullets to avoid clutter
+    return result.slice(0, 2);
   }
 
   // ----- DOM creation / wiring ---------------------------------------------
@@ -335,7 +363,7 @@
         riskRow.appendChild(titleRow);
 
         // Evidence block (click risk row → toggle evidence)
-        const evidenceLines = normalizeEvidenceLines(risk.evidence);
+        const evidenceLines = buildEvidenceLines(risk);
         if (evidenceLines.length > 0) {
           const evidenceContainer = document.createElement("div");
           evidenceContainer.className = "scribbit-risk-evidence";
