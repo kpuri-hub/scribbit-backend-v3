@@ -55,7 +55,21 @@
    * ----------------------------------------------------- */
   function extractPageText() {
     if (!document.body) return "";
+
+    // Avoid scanning Scribbit's own panel text (which appears in document.body)
+    const panel = document.getElementById("scribbit-fairness-panel");
+    const prevDisplay = panel ? panel.style.display : null;
+    if (panel) {
+      // Hide panel while we read innerText so its content isn't included
+      panel.style.display = "none";
+    }
+
     const raw = document.body.innerText || "";
+
+    if (panel && prevDisplay !== null) {
+      panel.style.display = prevDisplay;
+    }
+
     return raw.length <= MAX_TEXT_LENGTH ? raw : raw.slice(0, MAX_TEXT_LENGTH);
   }
 
@@ -143,7 +157,7 @@
     waitForDependencies(() => {
       runScan();
 
-      // NEW: Re-scan when Airbnb loads dynamic fees (3-second window)
+      // Re-scan when Airbnb loads dynamic fees (3-second window)
       const observer = new MutationObserver(() => {
         runScan();
       });

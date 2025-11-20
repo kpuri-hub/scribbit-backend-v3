@@ -74,20 +74,79 @@ const ScribbitRules = (() => {
   }
 
   /**
-   * Helper to find keyword matches and return small evidence snippets.
+   * Clean a raw evidence snippet into a readable, single-sentence fragment.
+   */
+  function cleanEvidenceSnippet(snippet, maxLen = 220) {
+    if (!snippet || typeof snippet !== "string") return "";
+
+    let txt = snippet.replace(/\s+/g, " ").trim();
+
+    // Strip obvious Scribbit artifacts if they somehow sneak in
+    txt = txt.replace(/Scribbit\s+Multi-Risk\s+Test\s+Terms/gi, "");
+    txt = txt.replace(/Scribbit\b/gi, "");
+    txt = txt.replace(/rail risk\s*\(\s*\d+\/\d+\s*\)/gi, "");
+
+    txt = txt.replace(/\s+/g, " ").trim();
+    if (!txt) return "";
+
+    if (txt.length > maxLen) {
+      let cut = txt.slice(0, maxLen - 1);
+      const lastPeriod = cut.lastIndexOf(".");
+      const lastSpace = cut.lastIndexOf(" ");
+      const boundary =
+        lastPeriod > 80 ? lastPeriod + 1 : lastSpace > 80 ? lastSpace : cut.length;
+      txt = cut.slice(0, boundary).trim() + "…";
+    }
+
+    return txt;
+  }
+
+  /**
+   * Find keyword matches and return sentence-level evidence snippets.
+   *
+   * - Uses rawText for slicing, to preserve case / punctuation.
+   * - Expands to the sentence containing the keyword (prev/next . ? ! or newline).
    */
   function findKeywordEvidence(textNormalized, rawText, keywords, maxSnippets = 3) {
     const snippets = [];
+    if (!rawText || !keywords || !keywords.length) return snippets;
+
     const lowerRaw = rawText.toLowerCase();
+    const added = new Set();
 
     for (const keyword of keywords) {
       const needle = keyword.toLowerCase();
       let index = lowerRaw.indexOf(needle);
       while (index !== -1 && snippets.length < maxSnippets) {
-        const start = Math.max(0, index - 60);
-        const end = Math.min(rawText.length, index + needle.length + 60);
-        const snippet = rawText.slice(start, end).trim();
-        snippets.push(snippet);
+        // Find sentence boundaries around the keyword
+        let start = index;
+        while (start > 0) {
+          const ch = lowerRaw[start - 1];
+          if (ch === "." || ch === "!" || ch === "?" || ch === "\n" || ch === "\r") break;
+          start--;
+        }
+
+        let end = index + needle.length;
+        while (end < lowerRaw.length) {
+          const ch = lowerRaw[end];
+          if (ch === "." || ch === "!" || ch === "?" || ch === "\n" || ch === "\r") {
+            end++; // include the punctuation
+            break;
+          }
+          end++;
+        }
+
+        if (end <= start) {
+          end = Math.min(lowerRaw.length, index + needle.length + 80);
+        }
+
+        const rawSnippet = rawText.slice(start, end);
+        const cleaned = cleanEvidenceSnippet(rawSnippet);
+        if (cleaned && !added.has(cleaned.toLowerCase())) {
+          snippets.push(cleaned);
+          added.add(cleaned.toLowerCase());
+        }
+
         index = lowerRaw.indexOf(needle, index + needle.length);
       }
       if (snippets.length >= maxSnippets) break;
@@ -425,13 +484,6 @@ const ScribbitRules = (() => {
   /************************************************************
    * Rule 4b: Free trial that converts to paid, likely auto-renew
    *  - trial_converts_to_paid_subscription
-   *
-   * Triggers when:
-   *  - We see "free trial" / "trial period" language, AND
-   *  - We also see clear signals of billing after trial:
-   *      - "after your trial", "at the end of the trial",
-   *      - plus "you will be charged", "you will be billed",
-   *      - or auto-renew style phrases ("renews automatically", "until you cancel").
    ************************************************************/
   const TRIAL_AUTO_RENEW_RULE = {
     id: "trial_auto_renew_basic",
@@ -549,9 +601,13 @@ const ScribbitRules = (() => {
   };
 
   /************************************************************
-   * Rule 6: Hidden / extra fees (Airbnb-friendly)
+   * Rule 6: Hidden / extra fees (Airbnb/Booking-friendly)
    *  - extra_fees_not_in_base_price
-   *  - resort_or_facility_fee (when resort-style language present)
+   *  - resort_or_facility_fee
+   *
+   * NOTE: To avoid confusing users with noisy price-breakdown text
+   * (e.g., Booking.com discounts mixed with taxes), we use generic,
+   * human-friendly evidence sentences instead of raw slices.
    ************************************************************/
   const HIDDEN_FEES_RULE = {
     id: "hidden_fees_basic",
@@ -560,7 +616,6 @@ const ScribbitRules = (() => {
       const text = snapshot.textNormalized || "";
       if (!text) return null;
 
-      const raw = snapshot.textRaw || "";
       const url = snapshot.url || "";
 
       // Strong resort/facility-style fees
@@ -614,8 +669,10 @@ const ScribbitRules = (() => {
         "charged by the property"
       ];
 
-      let hasStrong = strongFeeTerms.some((kw) => text.includes(kw));
-      let hasGeneral = generalFeeTerms.some((kw) => text.includes(kw));
+      const lower = text.toLowerCase();
+
+      let hasStrong = strongFeeTerms.some((kw) => lower.includes(kw));
+      let hasGeneral = generalFeeTerms.some((kw) => lower.includes(kw));
 
       // Airbnb-specific phrases that often indicate extra line items
       if (!hasStrong && !hasGeneral && url.toLowerCase().includes("airbnb.")) {
@@ -625,22 +682,24 @@ const ScribbitRules = (() => {
           "taxes may be collected",
           "taxes and fees may apply"
         ];
-        hasGeneral = airbnbPhrases.some((kw) => text.includes(kw));
+        hasGeneral = airbnbPhrases.some((kw) => lower.includes(kw));
       }
 
       if (!hasStrong && !hasGeneral) return null;
 
-      const evidence = findKeywordEvidence(
-        text,
-        raw,
-        strongFeeTerms.concat(generalFeeTerms)
-      );
-
-      if (!evidence.length) return null;
-
       let cardId = "extra_fees_not_in_base_price";
+      let evidence;
+
       if (hasStrong) {
         cardId = "resort_or_facility_fee";
+        evidence = [
+          "Nightly rate may not include resort or facility fees that are collected separately at the property."
+        ];
+      } else {
+        // Generic but accurate wording for extra fees / taxes
+        evidence = [
+          "The displayed price may exclude taxes, cleaning fees, or other mandatory charges that are added at checkout or collected at the property."
+        ];
       }
 
       return createRiskFromCard(cardId, evidence, {
