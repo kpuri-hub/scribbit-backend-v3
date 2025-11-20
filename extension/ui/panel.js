@@ -1,23 +1,5 @@
 // ui/panel.js
 // Scribbit Fairness Scanner - On-page Panel (Risk v2 UI)
-//
-// Behaviour:
-// - ONLY shows if there is at least 1 risk overall (no "flash on every page")
-// - ALWAYS renders all 4 categories (Financial, Data, Content, Legal) when visible
-// - Each category shows: name, severity level, bar, and # of issues
-// - Clicking a category header toggles expand/collapse
-// - Panel has a close button that hides it and prevents it from reappearing
-// - UI is fully data-driven: no hardcoded card IDs
-//
-// It consumes the Risk Engine result object:
-//   {
-//     risks: [ { id, category, title, description, severity, evidence?, ... }, ... ],
-//     categoryScores: { financial, data_privacy, content_ip, legal_rights },
-//     riskScore,
-//     overallLevel,
-//     hasMeaningfulContent,
-//     pageMode
-//   }
 
 (function () {
   const PANEL_ID = "scribbit-fairness-panel";
@@ -111,9 +93,8 @@
    * Take raw risk.evidence and turn it into:
    * - trimmed
    * - deduped (case-insensitive)
-   * - stripped of risk title / "Why is this risky?"
-   * - max ~1–2 concise sentences (~160 chars)
-   * - at most 2 bullets
+   * - stripped of risk title / "Why is this risky?" / obvious UI noise
+   * - a single concise sentence (~140 chars)
    */
   function buildEvidenceLines(risk) {
     const rawLines = Array.isArray(risk && risk.evidence) ? risk.evidence : [];
@@ -134,12 +115,24 @@
           const reTitle = new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
           txt = txt.replace(reTitle, " ");
         } catch (e) {
-          // if regex fails, skip stripping title
+          // ignore if regex fails
         }
       }
 
-      // Strip any "Why is this risky?" label fragments
+      // Strip any "Why is this risky?" fragments
       txt = txt.replace(/why is this risky\??/gi, " ");
+
+      // Strip common UI-ish noise tokens
+      txt = txt.replace(/\bNO ISSUES\b/gi, " ");
+      txt = txt.replace(/\b[0-9]+\s*issues?\b/gi, " ");
+      txt = txt.replace(/\bFinancial Exposure\b/gi, " ");
+      txt = txt.replace(/\bPersonal Data & Privacy\b/gi, " ");
+      txt = txt.replace(/\bContent & Image Rights\b/gi, " ");
+      txt = txt.replace(/\bLegal Rights & Control\b/gi, " ");
+      txt = txt.replace(/\brisk\s*\(\d+\/\d+\)\b/gi, " ");
+
+      // Remove leading bullets/plus signs
+      txt = txt.replace(/^[+\-•–\s]+/, "");
 
       // Collapse whitespace
       txt = txt.replace(/\s+/g, " ").trim();
@@ -147,12 +140,12 @@
 
       // Try to keep only the first sentence if it's reasonably long
       const periodIndex = txt.indexOf(". ");
-      if (periodIndex > 40 && periodIndex < 200) {
+      if (periodIndex > 40 && periodIndex < 180) {
         txt = txt.slice(0, periodIndex + 1);
       }
 
       // Soft-truncate very long snippets
-      const MAX_LEN = 160;
+      const MAX_LEN = 140;
       if (txt.length > MAX_LEN) {
         let cut = txt.slice(0, MAX_LEN - 1);
         const lastSpace = cut.lastIndexOf(" ");
@@ -168,8 +161,8 @@
       result.push(txt);
     });
 
-    // At most 2 bullets to avoid clutter
-    return result.slice(0, 2);
+    // At most 1 bullet to keep things readable
+    return result.slice(0, 1);
   }
 
   // ----- DOM creation / wiring ---------------------------------------------

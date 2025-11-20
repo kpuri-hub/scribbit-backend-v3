@@ -88,6 +88,8 @@
 .scribbit-panel-body {
   padding: 10px 10px 10px;
   background: #f9fafb;
+  max-height: 70vh;          /* prevent panel from growing off screen */
+  overflow-y: auto;          /* scroll inside panel when tall */
 }
 
 .scribbit-panel-summary {
@@ -284,8 +286,9 @@
 }
 
 .scribbit-risk-evidence.expanded {
-  max-height: 500px; /* enough for a few lines of bullets */
+  max-height: 140px;        /* cap each details block */
   opacity: 1;
+  overflow-y: auto;          /* scroll inside details if needed */
 }
 
 .scribbit-risk-evidence-list {
