@@ -282,6 +282,7 @@
         tooltip.textContent = getRiskDescription(risk);
         tooltip.style.display = "none";
 
+        // Keep tooltip behavior separate from evidence expansion
         whyBtn.addEventListener("click", (evt) => {
           evt.stopPropagation();
           const visible = tooltip.style.display === "block";
@@ -295,6 +296,40 @@
         titleRow.appendChild(whyWrap);
 
         riskRow.appendChild(titleRow);
+
+        // Evidence block (click risk row → toggle evidence)
+        const evidenceLines = Array.isArray(risk.evidence) ? risk.evidence : [];
+        if (evidenceLines.length > 0) {
+          const evidenceContainer = document.createElement("div");
+          evidenceContainer.className = "scribbit-risk-evidence";
+
+          const evidenceList = document.createElement("ul");
+          evidenceList.className = "scribbit-risk-evidence-list";
+
+          evidenceLines.forEach((line) => {
+            if (typeof line !== "string") return;
+            const trimmed = line.trim();
+            if (!trimmed) return;
+            const li = document.createElement("li");
+            li.textContent = trimmed;
+            evidenceList.appendChild(li);
+          });
+
+          if (evidenceList.children.length > 0) {
+            evidenceContainer.appendChild(evidenceList);
+            riskRow.appendChild(evidenceContainer);
+
+            riskRow.addEventListener("click", () => {
+              const isExpanded = evidenceContainer.classList.contains("expanded");
+              if (isExpanded) {
+                evidenceContainer.classList.remove("expanded");
+              } else {
+                evidenceContainer.classList.add("expanded");
+              }
+            });
+          }
+        }
+
         body.appendChild(riskRow);
       });
     } else {
@@ -310,7 +345,7 @@
       toggle.textContent = "▸";
     }
 
-    // Toggle expand/collapse
+    // Toggle expand/collapse for category
     toggle.addEventListener("click", (evt) => {
       evt.stopPropagation();
       const isHidden = body.style.display === "none";

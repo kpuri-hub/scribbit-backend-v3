@@ -77,6 +77,7 @@ PATTERNS: Dict[str, Dict[str, Any]] = {
 def _run_seed_heuristics(text: str) -> List[RiskItem]:
     """
     Run simple keyword/regex-based heuristics and return a list of RiskItem objects.
+    Each RiskItem now also carries an `evidence` list for UI expansion.
     """
     risks: List[RiskItem] = []
 
@@ -89,12 +90,17 @@ def _run_seed_heuristics(text: str) -> List[RiskItem]:
         for m in regex.finditer(text):
             start = m.start()
             end = m.end()
+
             # Grab a local snippet around the match
             window_start = max(start - 80, 0)
             window_end = min(end + 80, len(text))
             snippet = text[window_start:window_end].strip()
 
             span = RiskSpan(start=start, end=end)
+
+            # For now, evidence is a single-item list containing the snippet.
+            # Later you can expand this to line-based evidence or multiple hits.
+            evidence = [snippet] if snippet else []
 
             risks.append(
                 RiskItem(
@@ -104,6 +110,7 @@ def _run_seed_heuristics(text: str) -> List[RiskItem]:
                     span=span,
                     snippet=snippet,
                     rationale=rationale,
+                    evidence=evidence,
                 )
             )
 
