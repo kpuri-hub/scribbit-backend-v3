@@ -90,11 +90,59 @@
   }
 
   /**
-   * Take raw risk.evidence and turn it into:
+   * Risk-specific tweak helpers
+   */
+
+  function refineUltraShortCancellationText(txt) {
+    // Prefer the sentence that talks about 24 hours / 1 day
+    const lower = txt.toLowerCase();
+    const keyIndex = lower.indexOf("24 hours");
+    if (keyIndex === -1) return txt;
+
+    // Find sentence start (previous period or start)
+    let start = txt.lastIndexOf(".", keyIndex);
+    if (start === -1) start = 0; else start += 1;
+
+    // Find sentence end (next period, or end)
+    let end = txt.indexOf(".", keyIndex);
+    if (end === -1) end = txt.length; else end += 1;
+
+    let slice = txt.slice(start, end).trim();
+    if (!slice) return txt;
+    return slice;
+  }
+
+  function refineResortFeeText(txt) {
+    // Prefer the sentence that mentions "resort fee" / "facility fee" / "service fees"
+    const lower = txt.toLowerCase();
+    const markers = ["resort fee", "facility fee", "service fees", "not include a resort"];
+    let keyIndex = -1;
+    for (const m of markers) {
+      const idx = lower.indexOf(m);
+      if (idx !== -1) {
+        keyIndex = idx;
+        break;
+      }
+    }
+    if (keyIndex === -1) return txt;
+
+    let start = txt.lastIndexOf(".", keyIndex);
+    if (start === -1) start = 0; else start += 1;
+
+    let end = txt.indexOf(".", keyIndex);
+    if (end === -1) end = txt.length; else end += 1;
+
+    const slice = txt.slice(start, end).trim();
+    return slice || txt;
+  }
+
+  /**
+   * Take raw risk.evidence and turn it into one concise, readable bullet:
    * - trimmed
    * - deduped (case-insensitive)
    * - stripped of risk title / "Why is this risky?" / obvious UI noise
-   * - a single concise sentence (~140 chars)
+   * - risk-specific refinement for some cards
+   * - discount / promo lines are skipped for "extra fees" style risks
    */
   function buildEvidenceLines(risk) {
     const rawLines = Array.isArray(risk && risk.evidence) ? risk.evidence : [];
@@ -104,6 +152,17 @@
     if (!rawLines.length) return result;
 
     const title = (risk && risk.title) ? String(risk.title) : "";
+    const titleLower = title.toLowerCase();
+
+    const isUltraShort =
+      /ultra[\s-]*short/i.test(titleLower) ||
+      /24[-\s]*hour/.test(titleLower);
+    const isResortFee =
+      /resort/i.test(titleLower) ||
+      /facility fee/i.test(titleLower);
+    const isExtraFees =
+      /extra fees/i.test(titleLower) ||
+      /not in base price/i.test(titleLower);
 
     rawLines.forEach((raw) => {
       if (typeof raw !== "string") return;
@@ -138,6 +197,28 @@
       txt = txt.replace(/\s+/g, " ").trim();
       if (!txt) return;
 
+      // Skip obvious discount / promo snippets for extra-fee-like risks
+      if (isExtraFees) {
+        const lower = txt.toLowerCase();
+        if (
+          lower.includes("discount") ||
+          lower.includes("genius") ||
+          lower.includes("% off") ||
+          lower.includes("promotion") ||
+          lower.includes("promo") ||
+          lower.includes("save ")
+        ) {
+          return;
+        }
+      }
+
+      // Risk-specific refinement
+      if (isUltraShort) {
+        txt = refineUltraShortCancellationText(txt);
+      } else if (isResortFee) {
+        txt = refineResortFeeText(txt);
+      }
+
       // Try to keep only the first sentence if it's reasonably long
       const periodIndex = txt.indexOf(". ");
       if (periodIndex > 40 && periodIndex < 180) {
@@ -145,7 +226,7 @@
       }
 
       // Soft-truncate very long snippets
-      const MAX_LEN = 140;
+      const MAX_LEN = 180;
       if (txt.length > MAX_LEN) {
         let cut = txt.slice(0, MAX_LEN - 1);
         const lastSpace = cut.lastIndexOf(" ");
@@ -161,8 +242,9 @@
       result.push(txt);
     });
 
-    // At most 1 bullet to keep things readable
-    return result.slice(0, 1);
+    // At most 1–2 bullets to keep things readable
+    if (result.length > 2) return result.slice(0, 2);
+    return result;
   }
 
   // ----- DOM creation / wiring ---------------------------------------------
