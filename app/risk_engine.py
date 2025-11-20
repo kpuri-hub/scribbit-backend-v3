@@ -1,114 +1,180 @@
 from __future__ import annotations
 
-from typing import List, Dict, Any, Optional
-import re
 import logging
-from app.schemas import AnalyzeResponse, RiskItem
+import re
+from typing import List, Dict, Any, Optional
 
-log = logging.getLogger("analyze")
+from app.schemas import AnalyzeResponse, RiskItem, RiskSpan
 
-# Simple keyword patterns for the seed heuristic engine
+log = logging.getLogger("scribbit.risk_engine")
+
+# ------------------------------------------------------------------------------
+# Seed heuristic patterns
+# ------------------------------------------------------------------------------
+
 PATTERNS: Dict[str, Dict[str, Any]] = {
     "Non-Refundable": {
-        "regex": re.compile(r"\b(non[-\s]?refundable|all sales are final|no refunds?)\b", re.I),
+        "regex": re.compile(
+            r"\b(non[-\s]?refundable|all sales are final|no refunds?)\b",
+            re.IGNORECASE,
+        ),
         "severity": "High",
-        "score": 9,
+        "score": 9.0,
         "rationale": "Text indicates payments are non-refundable or all sales are final.",
     },
     "Auto-Renewal": {
-        "regex": re.compile(r"\b(auto[-\s]?renew(al)?|renews? automatically|rollover)\b", re.I),
+        "regex": re.compile(
+            r"\b(auto[-\s]?renew(al)?|renews? automatically|rollover)\b",
+            re.IGNORECASE,
+        ),
         "severity": "Medium",
-        "score": 6,
+        "score": 6.0,
         "rationale": "Contract renews automatically unless cancelled.",
     },
     "Arbitration": {
-        "regex": re.compile(r"\barbitration|binding arbitration|waiver of jury trial\b", re.I),
+        "regex": re.compile(
+            r"\barbitration|binding arbitration|waiver of jury trial\b",
+            re.IGNORECASE,
+        ),
         "severity": "Medium",
-        "score": 5,
+        "score": 5.0,
         "rationale": "Disputes may be forced into arbitration; rights may be limited.",
     },
     "Unilateral Changes": {
-        "regex": re.compile(r"\bwe may (change|modify|update) (these )?(terms|fees|prices)\b", re.I),
+        "regex": re.compile(
+            r"\bwe may (change|modify|update) (these )?(terms|fees|prices)\b",
+            re.IGNORECASE,
+        ),
         "severity": "High",
-        "score": 8,
+        "score": 8.0,
         "rationale": "One party can change terms/fees unilaterally.",
     },
     "Data Sharing": {
-        "regex": re.compile(r"\bshare (your )?(data|information)|third[-\s]?part(y|ies)\b", re.I),
+        "regex": re.compile(
+            r"\bshare (your )?(data|information)|third[-\s]?part(y|ies)\b",
+            re.IGNORECASE,
+        ),
         "severity": "Medium",
-        "score": 5,
+        "score": 5.0,
         "rationale": "Mentions data sharing with third parties.",
     },
     "Foreign Exchange / Fees": {
-        "regex": re.compile(r"\b(foreign exchange|fx|currency conversion|conversion fee|cross[-\s]?border fee)\b", re.I),
+        "regex": re.compile(
+            r"\b(foreign exchange|fx|currency conversion|conversion fee|cross[-\s]?border fee)\b",
+            re.IGNORECASE,
+        ),
         "severity": "Medium",
-        "score": 5,
+        "score": 5.0,
         "rationale": "Mentions currency conversion or FX fees.",
     },
 }
 
 
+# ------------------------------------------------------------------------------
+# Internal helpers
+# ------------------------------------------------------------------------------
+
 def _run_seed_heuristics(text: str) -> List[RiskItem]:
+    """
+    Run simple keyword/regex-based heuristics and return a list of RiskItem objects.
+    """
     risks: List[RiskItem] = []
+
     for risk_type, cfg in PATTERNS.items():
-        hits = list(cfg["regex"].finditer(text))
-        for m in hits:
-            snippet = text[max(m.start() - 80, 0): m.end() + 80]
+        regex = cfg["regex"]
+        severity = cfg["severity"]
+        score = float(cfg["score"])
+        rationale = cfg["rationale"]
+
+        for m in regex.finditer(text):
+            start = m.start()
+            end = m.end()
+            # Grab a local snippet around the match
+            window_start = max(start - 80, 0)
+            window_end = min(end + 80, len(text))
+            snippet = text[window_start:window_end].strip()
+
+            span = RiskSpan(start=start, end=end)
+
             risks.append(
                 RiskItem(
                     type=risk_type,
-                    severity=cfg["severity"],
-                    score=int(cfg["score"]),
-                    snippet=snippet.strip(),
-                    rationale=cfg["rationale"],
+                    severity=severity,
+                    score=score,
+                    span=span,
+                    snippet=snippet,
+                    rationale=rationale,
                 )
             )
+
     return risks
 
 
-def _summarize(risks: List[RiskItem]) -> Dict[str, Any]:
-    by_type: Dict[str, int] = {}
-    total_score = 0
-    for r in risks:
-        by_type[r.type] = by_type.get(r.type, 0) + 1
-        total_score += r.score
-    return {
-        "by_type": by_type,
-        "total_score": total_score,
-        "risk_level": (
-            "High" if total_score >= 15
-            else "Medium" if total_score >= 7
-            else "Low"
-        ),
-    }
-
-
-def analyze_terms(text: str, model_hint: Optional[str] = None) -> AnalyzeResponse:
+def _grade_from_score(total_risk_score: float) -> str:
     """
-    Option B:
-    - Accept an optional model_hint
-    - Default to 'seed-heuristics'
-    - Stub for future GPT path
+    Simple letter-grade mapping for now.
+    This can evolve into your Risk Model v2+ mapping later.
+    """
+    if total_risk_score <= 5:
+        return "A"
+    if total_risk_score <= 12:
+        return "B"
+    if total_risk_score <= 20:
+        return "C"
+    return "D"
+
+
+# ------------------------------------------------------------------------------
+# Public API
+# ------------------------------------------------------------------------------
+
+def analyze_terms(
+    text: str,
+    doc_name: Optional[str] = None,
+    include_explanation: bool = True,
+    model_hint: Optional[str] = None,
+) -> AnalyzeResponse:
+    """
+    Canonical risk analysis function for Scribbit backend.
+
+    - Currently uses seed heuristics (regex patterns).
+    - In the future, model_hint can route to OpenAI or other engines.
     """
     engine = (model_hint or "seed-heuristics").strip().lower()
 
-    if engine in ("seed-heuristics", "heuristics", "local"):
+    if engine in ("seed-heuristics", "heuristics", "local", ""):
         risks = _run_seed_heuristics(text)
-        summary = _summarize(risks)
         model_used = "seed-heuristics"
     elif engine in ("gpt-4o-mini", "openai", "gpt"):
-        # Stub: fill in later with OpenAI call
+        # Stub for future deep AI integration
         raise NotImplementedError("OpenAI model integration not yet enabled.")
     else:
-        # Unknown hint -> fall back to heuristics
+        # Unknown engine hint – fall back to heuristics
+        log.warning("Unknown model_hint '%s'; falling back to seed-heuristics.", engine)
         risks = _run_seed_heuristics(text)
-        summary = _summarize(risks)
         model_used = f"seed-heuristics (fallback from '{engine}')"
 
+    total_risk_score = float(sum(r.score for r in risks))
+    grade = _grade_from_score(total_risk_score)
+
+    # Very rough token estimate – can be swapped for a tokenizer later
+    tokens = len(text.split())
+
+    # NOTE: We deliberately do not log raw text here to avoid PII.
+    log.info(
+        "analyze_terms: doc=%s risks=%d score=%.2f grade=%s model=%s",
+        doc_name or "N/A",
+        len(risks),
+        total_risk_score,
+        grade,
+        model_used,
+    )
+
     return AnalyzeResponse(
-        doc_name="",
-        model_used=model_used,
-        total_risks=len(risks),
+        doc_name=doc_name or "",
+        total_risk_score=total_risk_score,
+        grade=grade,
         risks=risks,
-        summary=summary,
+        model=model_used,
+        tokens=tokens,
     )
