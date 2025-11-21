@@ -6,6 +6,7 @@
 // - Add Airbnb-specific fee extraction & currency markers
 // - Decide WHEN to scan (skip search engines, blocked domains,
 //   and search results pages on major travel sites)
+// - Detect SPA-style URL changes (Airbnb, OTAs) and re-scan
 // - Call ScribbitRiskEngine.evaluatePage(snapshot)
 // - Send results via ScribbitMessaging.sendScanComplete
 //
@@ -13,6 +14,7 @@
 
 (function () {
   const MAX_TEXT_LENGTH = 50000;
+  const SPA_URL_CHECK_INTERVAL_MS = 500;
 
   const SEARCH_ENGINE_HOSTS = [
     "www.google.com",
@@ -49,6 +51,111 @@
     "www.notion.so"
   ];
 
+  // Expedia group / meta, etc.
+  const EXPEDIA_FAMILY = [
+    "expedia.com",
+    "expedia.ca",
+    "expedia.co.uk",
+    "expedia.com.au",
+    "hotels.com",
+    "hotwire.com",
+    "orbitz.com",
+    "travelocity.com",
+    "ebookers.com",
+    "wotif.com",
+    "cheaptickets.com"
+  ];
+
+  const META_SEARCH_FAMILY = [
+    "kayak.com",
+    "kayak.ca",
+    "kayak.co.uk",
+    "skyscanner.com",
+    "skyscanner.ca",
+    "momondo.com",
+    "momondo.ca",
+    "trivago.com",
+    "trivago.ca",
+    "tripadvisor.com",
+    "tripadvisor.ca",
+    "agoda.com",
+    "agoda.ca"
+  ];
+
+  const HOTEL_BRANDS = [
+    "marriott.com",
+    "hilton.com",
+    "ihg.com",
+    "hyatt.com",
+    "accor.com",
+    "choicehotels.com",
+    "bestwestern.com",
+    "wyndhamhotels.com",
+    "radissonhotels.com",
+    "shangri-la.com",
+    "fourseasons.com",
+    "ryanairrooms.com"
+  ];
+
+  const AIRLINES = [
+    "delta.com",
+    "aa.com",
+    "united.com",
+    "southwest.com",
+    "alaskaair.com",
+    "westjet.com",
+    "aircanada.com",
+    "lufthansa.com",
+    "ba.com",
+    "britishairways.com",
+    "ryanair.com",
+    "easyjet.com",
+    "jetblue.com",
+    "spirit.com",
+    "frontierairlines.com",
+    "qantas.com",
+    "emirates.com",
+    "qatarairways.com",
+    "etihad.com",
+    "singaporeair.com"
+  ];
+
+  const CAR_RENTAL = [
+    "hertz.com",
+    "avis.com",
+    "budget.com",
+    "enterprise.com",
+    "alamo.com",
+    "nationalcar.com",
+    "sixt.com",
+    "easirent.com",
+    "thrifty.com",
+    "dollar.com"
+  ];
+
+  const CRUISES = [
+    "carnival.com",
+    "royalcaribbean.com",
+    "norwegiancruiseline.com",
+    "ncl.com",
+    "celebritycruises.com",
+    "princess.com",
+    "hollandamerica.com"
+  ];
+
+  const REGIONAL_TRAVEL = [
+    "tui.com",
+    "tui.co.uk",
+    "vacationstogo.com",
+    "lastminute.com",
+    "travelzoo.com",
+    "holidaylettings.co.uk",
+    "agriturismo.it",
+    "homeaway.co.uk",
+    "fewo-direkt.de",
+    "stayz.com.au"
+  ];
+
   function isSearchEngineHost(hostname) {
     return SEARCH_ENGINE_HOSTS.includes(hostname);
   }
@@ -66,33 +173,24 @@
    * Goal:
    * - Skip "browse listings / search results" views where Scribbit would feel spammy.
    * - Still allow Scribbit on details / checkout pages.
-   *
-   * Implementation:
-   * - Domain-based heuristics: for a large set of travel hosts, we look for
-   *   path fragments like "search", "searchresults", "results", "flights", "cars", etc.
-   * - Kept reasonably conservative to avoid suppressing listing/checkout pages.
    */
   function isSearchResultsPage(hostname, url) {
     const host = (hostname || "").toLowerCase();
     const href = (url || "").toLowerCase();
 
-    // Helper: does URL contain any of the given substrings?
     function urlContainsAny(substrings) {
       return substrings.some((s) => href.includes(s));
     }
 
-    // Booking.com (already had this)
+    // Booking.com (classic searchresults pages)
     if (host.endsWith("booking.com")) {
       if (urlContainsAny(["/searchresults", "searchresults.html"])) return true;
     }
 
     // Airbnb
-    // - Search/explore: /s/ or /homes/ or /stays
+    // - Search/explore: /s/, /homes, /stays, /wishlists
     // - Listing details: /rooms/ (we DO want Scribbit there)
-    if (host.endsWith("airbnb.com")) {
-      if (href.includes("airbnb.ca/")) {
-        // local TLDs handled by same path rules via endsWith below
-      }
+    if (host.endsWith("airbnb.com") || host.endsWith("airbnb.ca")) {
       if (urlContainsAny(["/s/", "/homes", "/stays", "/wishlists"])) {
         if (!href.includes("/rooms/")) return true;
       }
@@ -105,22 +203,7 @@
       }
     }
 
-    // Expedia Group:
-    // expedia.*, hotels.com, orbitz.com, travelocity.com, ebookers.com, wotif.com, vrbo.ca etc.
-    const EXPEDIA_FAMILY = [
-      "expedia.com",
-      "expedia.ca",
-      "expedia.co.uk",
-      "expedia.com.au",
-      "hotels.com",
-      "hotwire.com",
-      "orbitz.com",
-      "travelocity.com",
-      "ebookers.com",
-      "wotif.com",
-      "cheaptickets.com"
-    ];
-
+    // Expedia Group family
     if (EXPEDIA_FAMILY.some((d) => host === d || host.endsWith("." + d))) {
       if (urlContainsAny([
         "/Hotel-Search",
@@ -137,40 +220,7 @@
       }
     }
 
-    // Priceline family
-    if (
-      host.endsWith("priceline.com") ||
-      host.endsWith("bookingholdings.com")
-    ) {
-      if (urlContainsAny([
-        "/hotel/results",
-        "/hotel/search",
-        "/flights/results",
-        "/flight/search",
-        "/cars/results",
-        "/cars/search"
-      ])) {
-        return true;
-      }
-    }
-
-    // Kayak, Momondo, Skyscanner, Trivago, etc.
-    const META_SEARCH_FAMILY = [
-      "kayak.com",
-      "kayak.ca",
-      "kayak.co.uk",
-      "skyscanner.com",
-      "skyscanner.ca",
-      "momondo.com",
-      "momondo.ca",
-      "trivago.com",
-      "trivago.ca",
-      "tripadvisor.com",
-      "tripadvisor.ca",
-      "agoda.com",
-      "agoda.ca"
-    ];
-
+    // Kayak, Skyscanner, Momondo, Trivago, TripAdvisor, Agoda
     if (META_SEARCH_FAMILY.some((d) => host === d || host.endsWith("." + d))) {
       if (urlContainsAny([
         "/flights/",
@@ -188,22 +238,7 @@
       }
     }
 
-    // Direct hotel brands - treat "find reservation" / search pages as search results
-    const HOTEL_BRANDS = [
-      "marriott.com",
-      "hilton.com",
-      "ihg.com",
-      "hyatt.com",
-      "accor.com",
-      "choicehotels.com",
-      "bestwestern.com",
-      "wyndhamhotels.com",
-      "radissonhotels.com",
-      "shangri-la.com",
-      "fourseasons.com",
-      "ryanairrooms.com" // just in case
-    ];
-
+    // Direct hotel brands
     if (HOTEL_BRANDS.some((d) => host === d || host.endsWith("." + d))) {
       if (urlContainsAny([
         "/search",
@@ -215,32 +250,7 @@
       }
     }
 
-    // Airlines – we generally still want Scribbit on final booking steps,
-    // but search/browse pages can be noisy. We conservatively skip
-    // high-level flight search / fare-search URLs.
-    const AIRLINES = [
-      "delta.com",
-      "aa.com",
-      "united.com",
-      "southwest.com",
-      "alaskaair.com",
-      "westjet.com",
-      "aircanada.com",
-      "lufthansa.com",
-      "ba.com",
-      "britishairways.com",
-      "ryanair.com",
-      "easyjet.com",
-      "jetblue.com",
-      "spirit.com",
-      "frontierairlines.com",
-      "qantas.com",
-      "emirates.com",
-      "qatarairways.com",
-      "etihad.com",
-      "singaporeair.com"
-    ];
-
+    // Airlines
     if (AIRLINES.some((d) => host === d || host.endsWith("." + d))) {
       if (urlContainsAny([
         "/flight-search",
@@ -255,19 +265,6 @@
     }
 
     // Car rental brands
-    const CAR_RENTAL = [
-      "hertz.com",
-      "avis.com",
-      "budget.com",
-      "enterprise.com",
-      "alamo.com",
-      "nationalcar.com",
-      "sixt.com",
-      "easirent.com",
-      "thrifty.com",
-      "dollar.com"
-    ];
-
     if (CAR_RENTAL.some((d) => host === d || host.endsWith("." + d))) {
       if (urlContainsAny([
         "/car-rental",
@@ -280,17 +277,7 @@
       }
     }
 
-    // Cruises & package operators
-    const CRUISES = [
-      "carnival.com",
-      "royalcaribbean.com",
-      "norwegiancruiseline.com",
-      "ncl.com",
-      "celebritycruises.com",
-      "princess.com",
-      "hollandamerica.com"
-    ];
-
+    // Cruises
     if (CRUISES.some((d) => host === d || host.endsWith("." + d))) {
       if (urlContainsAny([
         "/cruise-search",
@@ -303,19 +290,6 @@
     }
 
     // Regional OTAs & villa / agriturismo style sites
-    const REGIONAL_TRAVEL = [
-      "tui.com",
-      "tui.co.uk",
-      "vacationstogo.com",
-      "lastminute.com",
-      "travelzoo.com",
-      "holidaylettings.co.uk",
-      "agriturismo.it",
-      "homeaway.co.uk",
-      "feWo-direkt.de",
-      "stayz.com.au"
-    ];
-
     if (REGIONAL_TRAVEL.some((d) => host === d || host.endsWith("." + d))) {
       if (urlContainsAny([
         "/search",
@@ -330,7 +304,6 @@
     }
 
     // Generic catch-all for travel subdomains:
-    // If something like "travel.example.com" uses very obvious "searchresults" paths.
     if (host.startsWith("travel.")) {
       if (urlContainsAny(["searchresults", "/search?", "/search/"])) {
         return true;
@@ -352,7 +325,7 @@
     const symbolMatches = rawText.match(/[$€£¥]/g);
     if (symbolMatches) symbolMatches.forEach((s) => markers.add(s));
 
-    const codeMatches = rawText.match(/\b(USD|CAD|EUR|GBP|AUD|NZD)\b/gi);
+    const codeMatches = rawText.match(/\b(USD|CAD|EUR|EUR|GBP|AUD|NZD)\b/gi);
     if (codeMatches) codeMatches.forEach((c) => markers.add(c.toUpperCase()));
 
     try {
@@ -370,7 +343,7 @@
     return Array.from(markers);
   }
 
-  // Airbnb-specific fee extraction
+  // Airbnb-specific fee extraction (also works reasonably on other OTAs)
   function extractAirbnbFees() {
     const fees = [];
 
@@ -382,7 +355,7 @@
       const feePatterns = [
         /cleaning fee/i,
         /service fee/i,
-        /Airbnb service fee/i,
+        /airbnb service fee/i,
         /occupancy taxes?/i,
         /tourism fee/i,
         /resort fee/i
@@ -444,7 +417,7 @@
         ? window.ScribbitRiskEngine.evaluatePage(snapshot)
         : null;
 
-    if (!window.ScribbitMessaging || !riskResult) {
+      if (!window.ScribbitMessaging || !riskResult) {
         if (!window.ScribbitMessaging) {
           console.warn("[Scribbit] scanner.js: ScribbitMessaging missing at runScan");
         }
@@ -484,6 +457,88 @@
     }, 200);
   }
 
+  // --- Dynamic re-scan for SPA + late-loading content ------------------------
+
+  let dynamicObserver = null;
+  let mutationScanTimeout = null;
+  let spaWatcherStarted = false;
+  let lastUrlSeen = null;
+
+  function startDynamicObserver() {
+    if (dynamicObserver) {
+      dynamicObserver.disconnect();
+      dynamicObserver = null;
+    }
+
+    try {
+      dynamicObserver = new MutationObserver(() => {
+        // Throttle re-scans to avoid hammering the backend
+        if (mutationScanTimeout) return;
+        mutationScanTimeout = setTimeout(() => {
+          mutationScanTimeout = null;
+          console.debug("[Scribbit] scanner.js: mutation-triggered re-scan");
+          runScan();
+        }, 500);
+      });
+
+      if (document.body) {
+        dynamicObserver.observe(document.body, {
+          childList: true,
+          subtree: true
+        });
+
+        // Keep the observer around for a few seconds to catch prices/fees
+        setTimeout(() => {
+          if (dynamicObserver) {
+            dynamicObserver.disconnect();
+            dynamicObserver = null;
+          }
+        }, 5000);
+      }
+    } catch (err) {
+      console.warn("[Scribbit] scanner.js: MutationObserver setup failed:", err);
+    }
+  }
+
+  function handleSpaUrlChange(newUrl) {
+    const hostname = window.location.hostname;
+
+    if (isBlockedDomain(hostname)) {
+      console.debug("[Scribbit] scanner: SPA URL change → blocked domain, skipping");
+      return;
+    }
+
+    if (isSearchEngineHost(hostname)) {
+      console.debug("[Scribbit] scanner: SPA URL change → search engine, skipping");
+      return;
+    }
+
+    if (isSearchResultsPage(hostname, newUrl)) {
+      console.debug("[Scribbit] scanner: SPA URL change → search results page, skipping");
+      return;
+    }
+
+    console.debug("[Scribbit] scanner: SPA URL changed, re-running scan:", newUrl);
+    runScan();
+    startDynamicObserver();
+  }
+
+  function setupSpaUrlWatcher() {
+    if (spaWatcherStarted) return;
+    spaWatcherStarted = true;
+    lastUrlSeen = location.href;
+
+    setInterval(() => {
+      const current = location.href;
+      if (current !== lastUrlSeen) {
+        lastUrlSeen = current;
+        handleSpaUrlChange(current);
+      }
+    }, SPA_URL_CHECK_INTERVAL_MS);
+  }
+
+  // --- Init ------------------------------------------------------------------
+
   function init() {
     const hostname = window.location.hostname;
     const url = window.location.href;
@@ -500,29 +555,17 @@
 
     if (isSearchResultsPage(hostname, url)) {
       console.debug("[Scribbit] scanner: skipping search results page:", url);
+      // Still start the SPA watcher so that when user clicks into a listing
+      // (e.g., Airbnb /rooms/...), we can start scanning there.
+      setupSpaUrlWatcher();
       return;
     }
 
     waitForDependencies(() => {
+      // Initial scan for the current URL
       runScan();
-
-      // Re-scan when Airbnb or other sites load dynamic pricing/fees (3-second window)
-      try {
-        const observer = new MutationObserver(() => {
-          runScan();
-        });
-
-        if (document.body) {
-          observer.observe(document.body, {
-            childList: true,
-            subtree: true
-          });
-
-          setTimeout(() => observer.disconnect(), 3000);
-        }
-      } catch (err) {
-        console.warn("[Scribbit] scanner.js: MutationObserver setup failed:", err);
-      }
+      startDynamicObserver();
+      setupSpaUrlWatcher();
     });
   }
 
