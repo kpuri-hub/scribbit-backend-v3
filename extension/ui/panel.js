@@ -5,12 +5,12 @@
 // - ONLY shows if there is at least 1 risk overall
 // - Renders 4 categories (Financial, Data, Content, Legal) when visible
 // - Each category shows: name, severity, bar, and # of issues
-// - NEW: Category detail lists are collapsed by default until user clicks
+// - Category detail lists are collapsed by default until user clicks
 // - Each risk card can show evidence in an expandable details area
 // - Panel has a close button that hides it completely for this page load
 // - Panel supports FULL vs MINI mode, toggled by clicking the header
 // - Panel remembers FULL/MINI per-domain in chrome.storage.local
-// - NEW: Panel does NOT flash full then mini; it only appears after mode is applied
+// - Panel does NOT flash full then mini; it only appears after mode is applied
 //
 // It consumes the Risk Engine result object:
 //   {
@@ -34,8 +34,10 @@
 
   const PANEL_STATE_STORAGE_KEY = "scribbit_panel_state_v1";
 
+  // Track if user manually closed the panel for this page
   let panelManuallyHidden = false;
-  let currentPanelMode = "full";
+  // Start in MINI mode by default to avoid full → mini flash
+  let currentPanelMode = "mini";
   let panelModeInitialized = false;
 
   // ----- Helpers -------------------------------------------------------------
@@ -220,8 +222,8 @@
       if (mode === "mini" || mode === "full") {
         setPanelMode(panel, mode);
       } else {
-        // default for domains with no stored state
-        setPanelMode(panel, "full");
+        // default for domains with no stored state → MINI to avoid full flash
+        setPanelMode(panel, "mini");
       }
       if (onReady) onReady();
     });
@@ -310,8 +312,6 @@
     panel.appendChild(header);
     panel.appendChild(body);
     panel.appendChild(footer);
-
-    document.body.appendChild(panel);
 
     return panel;
   }
@@ -562,7 +562,7 @@
       });
     }
 
-    // IMPORTANT: Only show the panel after mode is applied so we don't flash full → mini
+    // Only show the panel after mode is applied so we don't flash full → mini
     applyInitialPanelMode(panelEl, () => {
       panelEl.style.display = "block";
     });

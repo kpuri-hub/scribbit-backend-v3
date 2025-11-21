@@ -4,7 +4,7 @@
 // Responsibilities:
 // - Build a normalized snapshot of the page text
 // - Add Airbnb-specific fee extraction & currency markers
-// - Decide WHEN to scan (skip search engines, blocked domains)
+// - Decide WHEN to scan (skip search engines, blocked domains, search results pages)
 // - Call ScribbitRiskEngine.evaluatePage(snapshot)
 // - Send results via ScribbitMessaging.sendScanComplete
 //
@@ -23,8 +23,7 @@
     "www.duckduckgo.com"
   ];
 
-  // Domains where Scribbit should NEVER scan or show up.
-  // These are clearly personal/productivity contexts where a panel feels creepy.
+  // Domains where Scribbit should NEVER scan or show up
   const BLOCKED_DOMAINS = [
     // Webmail
     "mail.google.com",
@@ -57,6 +56,27 @@
     return BLOCKED_DOMAINS.some((blocked) => {
       return hostname === blocked || hostname.endsWith("." + blocked);
     });
+  }
+
+  /**
+   * Heuristic: detect search results pages we never want to scan.
+   * - Booking.com-specific: URLs containing "searchresults"
+   * - Generic: URLs containing "searchresults" or "/search?"
+   */
+  function isSearchResultsPage(hostname, url) {
+    const host = (hostname || "").toLowerCase();
+    const href = (url || "").toLowerCase();
+
+    // Booking.com search results (e.g. ...booking.com/searchresults...)
+    if (host.endsWith("booking.com") && href.includes("searchresults")) {
+      return true;
+    }
+
+    // Generic search-results-y URL shapes
+    if (href.includes("searchresults")) return true;
+    if (href.includes("/search?")) return true;
+
+    return false;
   }
 
   function extractPageText() {
@@ -205,6 +225,7 @@
 
   function init() {
     const hostname = window.location.hostname;
+    const url = window.location.href;
 
     if (isBlockedDomain(hostname)) {
       console.debug("[Scribbit] scanner: skipping blocked domain:", hostname);
@@ -216,10 +237,15 @@
       return;
     }
 
+    if (isSearchResultsPage(hostname, url)) {
+      console.debug("[Scribbit] scanner: skipping search results page:", url);
+      return;
+    }
+
     waitForDependencies(() => {
       runScan();
 
-      // Re-scan when Airbnb loads dynamic fees (3-second window)
+      // Re-scan briefly when dynamic content appears (e.g., Airbnb fees)
       try {
         const observer = new MutationObserver(() => {
           runScan();
