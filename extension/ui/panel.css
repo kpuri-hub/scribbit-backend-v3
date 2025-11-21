@@ -1,5 +1,5 @@
 /* ui/panel.css */
-/* Scribbit Fairness Scanner - On-page Panel Styles (Risk v2) */
+/* Scribbit Fairness Scanner - On-page Panel Styles (Risk v2 + Mini Mode) */
 
 #scribbit-fairness-panel {
   position: fixed;
@@ -11,13 +11,39 @@
   font-size: 14px;
   color: #0f172a;
   background: #ffffff;
-  border-radius: 10px;
+  border-radius: 12px;
   box-shadow: 0 10px 25px rgba(15, 23, 42, 0.25);
-  overflow: visible;
+  overflow: hidden;
 }
 
-/* Collapsed state: keep header visible, hide body */
-#scribbit-fairness-panel.collapsed .scribbit-panel-body {
+/* Panel modes */
+
+#scribbit-fairness-panel.scribbit-panel-full {
+  max-height: 80vh;
+}
+
+#scribbit-fairness-panel.scribbit-panel-mini {
+  max-width: 190px;
+  padding: 6px 10px;
+  max-height: none;
+}
+
+/* When in mini mode, hide body & footer, keep header compact */
+
+#scribbit-fairness-panel.scribbit-panel-mini .scribbit-panel-body,
+#scribbit-fairness-panel.scribbit-panel-mini .scribbit-panel-footer {
+  display: none;
+}
+
+#scribbit-fairness-panel.scribbit-panel-mini .scribbit-panel-header {
+  padding: 4px 8px;
+}
+
+#scribbit-fairness-panel.scribbit-panel-mini .scribbit-panel-title {
+  font-size: 13px;
+}
+
+#scribbit-fairness-panel.scribbit-panel-mini .scribbit-panel-subtitle {
   display: none;
 }
 
@@ -27,76 +53,55 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px;
-  background: #0f172a;
-  color: #f9fafb;
+  gap: 8px;
+  padding: 8px 10px;
+  background: #020617; /* near-black */
+  color: #e5e7eb;
   cursor: pointer;
 }
 
 .scribbit-panel-header-left {
   display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.scribbit-panel-logo {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .scribbit-panel-title {
-  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  font-size: 14px;
+}
+
+.scribbit-panel-subtitle {
+  font-size: 12px;
+  color: #9ca3af;
 }
 
 .scribbit-panel-header-right {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.scribbit-panel-badge {
-  display: inline-block;
-  padding: 2px 6px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  background: rgba(148, 163, 184, 0.3);
-  color: #e5e7eb;
+  gap: 4px;
 }
 
 .scribbit-panel-close {
   border: none;
   background: transparent;
   color: #e5e7eb;
-  font-size: 14px;
-  cursor: pointer;
+  font-size: 16px;
   line-height: 1;
-  padding: 0 4px;
+  cursor: pointer;
+  padding: 2px 4px;
 }
 
 .scribbit-panel-close:hover {
-  color: #ffffff;
+  color: #f97316;
 }
 
 /* Body */
 
 .scribbit-panel-body {
-  padding: 10px 10px 10px;
-  background: #f9fafb;
-  max-height: 70vh;          /* prevent panel from growing off screen */
-  overflow-y: auto;          /* scroll inside panel when tall */
-}
-
-.scribbit-panel-summary {
-  font-size: 13px;
-  font-weight: 500;
-  margin-bottom: 10px;
-  color: #0f172a;
+  padding: 10px 10px 8px;
+  max-height: 55vh;
+  overflow-y: auto;
 }
 
 /* Categories list */
@@ -112,8 +117,11 @@
   background: #ffffff;
   border-radius: 8px;
   padding: 8px 9px;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
-  overflow: visible;
+  border: 1px solid #e5e7eb;
+}
+
+.scribbit-category-card.scribbit-category-collapsed {
+  opacity: 0.92;
 }
 
 /* Category header */
@@ -122,108 +130,150 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  margin-bottom: 4px;
+  gap: 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
 }
 
 .scribbit-category-name {
-  font-size: 12px;
   font-weight: 600;
-  color: #111827;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.scribbit-category-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .scribbit-category-level {
   font-size: 11px;
-  font-weight: 600;
   padding: 2px 6px;
   border-radius: 999px;
+  border: 1px solid transparent;
   text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
-.scribbit-category-level-none {
-  background: rgba(148, 163, 184, 0.2);
+.scribbit-category-count {
+  font-size: 11px;
   color: #6b7280;
 }
 
-.scribbit-category-level-low {
-  background: rgba(22, 163, 74, 0.15);
-  color: #16a34a;
+.scribbit-category-toggle {
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  color: #6b7280;
 }
 
-.scribbit-category-level-med {
-  background: rgba(234, 179, 8, 0.15);
-  color: #eab308;
-}
-
-.scribbit-category-level-high {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+.scribbit-category-toggle:hover {
+  color: #0f172a;
 }
 
 /* Category bar */
 
-.scribbit-category-bar {
+.scribbit-category-bar-outer {
   position: relative;
-  width: 100%;
-  height: 5px;
-  border-radius: 999px;
-  background: rgba(148, 163, 184, 0.25);
-  overflow: hidden;
+  margin-top: 2px;
   margin-bottom: 6px;
+  height: 4px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
 }
 
-.scribbit-category-bar-fill {
+.scribbit-category-bar-inner {
   height: 100%;
   border-radius: 999px;
-  transition: width 0.2s ease-out;
 }
 
-.scribbit-category-bar-none { background: transparent; }
-.scribbit-category-bar-low  { background: #22c55e; }
-.scribbit-category-bar-med  { background: #eab308; }
-.scribbit-category-bar-high { background: #ef4444; }
+/* Category issues list */
 
-/* Risk block */
-
-.scribbit-category-risk-block {
-  margin-top: 2px;
+.scribbit-category-issues {
+  display: block;
+  margin-top: 4px;
 }
 
-/* Individual risk row */
-
-.scribbit-category-risk-block-item {
-  padding: 5px 0;
-  border-top: 1px solid rgba(148, 163, 184, 0.25);
-  cursor: pointer;
+.scribbit-category-empty {
+  font-size: 12px;
+  color: #6b7280;
 }
 
-.scribbit-category-risk-block-item:first-child {
-  border-top: none;
+/* Risk item */
+
+.scribbit-risk-item {
+  border-radius: 6px;
+  padding: 6px 6px 6px 6px;
+  margin-bottom: 4px;
+  background: #f9fafb;
 }
 
-/* Risk title row */
-
-.scribbit-category-risk-title-row {
+.scribbit-risk-title-row {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  position: relative;
-  overflow: visible;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
 }
 
 .scribbit-risk-title {
-  font-size: 13px;
   font-weight: 500;
+  font-size: 13px;
   color: #111827;
+  flex: 1;
 }
 
-/* Why button */
-
-.scribbit-risk-why-wrapper {
-  position: relative;
-  flex-shrink: 0;
+.scribbit-risk-severity {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
+
+.scribbit-risk-description {
+  font-size: 12px;
+  color: #4b5563;
+  margin-bottom: 4px;
+}
+
+/* Evidence */
+
+.scribbit-risk-evidence-container {
+  margin-top: 4px;
+}
+
+.scribbit-risk-evidence-toggle {
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  color: #0ea5e9;
+  cursor: pointer;
+  padding: 0;
+}
+
+.scribbit-risk-evidence-toggle:hover {
+  text-decoration: underline;
+}
+
+.scribbit-risk-evidence {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  font-size: 11px;
+  color: #374151;
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+.scribbit-risk-evidence li {
+  margin-bottom: 2px;
+}
+
+/* "Why is this risky?" */
 
 .scribbit-risk-why {
   border: none;
@@ -240,120 +290,62 @@
   text-decoration: underline;
 }
 
-/* Tooltip */
+/* Footer */
 
-.scribbit-risk-tooltip {
-  position: absolute;
-  right: 0;
-  bottom: 115%;
-  max-width: 280px;
-  background: #0f172a;
-  color: #f9fafb;
-  padding: 7px 9px;
-  border-radius: 6px;
-  font-size: 11px;
-  line-height: 1.4;
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.35);
-  display: none;
-  z-index: 99999999;
-}
-
-.scribbit-risk-tooltip::after {
-  content: "";
-  position: absolute;
-  top: 100%;
-  right: 8px;
-  border-width: 5px;
-  border-style: solid;
-  border-color: #0f172a transparent transparent transparent;
-}
-
-/* Hover behavior */
-.scribbit-risk-why-wrapper:hover .scribbit-risk-tooltip {
-  display: block;
-}
-
-/* Evidence block */
-
-.scribbit-risk-evidence {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #4b5563;
-  max-height: 0;
-  overflow: hidden;
-  opacity: 0;
-  transition: max-height 0.2s ease-out, opacity 0.2s ease-out;
-}
-
-.scribbit-risk-evidence.expanded {
-  max-height: 140px;        /* cap each details block */
-  opacity: 1;
-  overflow-y: auto;          /* scroll inside details if needed */
-}
-
-.scribbit-risk-evidence-list {
-  margin: 2px 0 0;
-  padding-left: 18px;
-}
-
-.scribbit-risk-evidence-list li {
-  margin: 0 0 2px;
-  line-height: 1.3;
-}
-
-/* Mute row */
-
-.scribbit-panel-mute-row {
+.scribbit-panel-footer {
+  border-top: 1px solid #e5e7eb;
+  padding: 8px 10px 9px;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.scribbit-panel-mute-toggle {
-  border: none;
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 11px;
-  cursor: pointer;
-  background: #0f172a;
-  color: #f9fafb;
-}
-
-.scribbit-panel-mute-toggle:hover {
-  background: #1f2937;
-}
-
-.scribbit-panel-mute-options {
-  display: none;
+  flex-direction: column;
   gap: 4px;
 }
 
-.scribbit-panel-mute-options.visible {
-  display: flex;
-}
-
-.scribbit-panel-mute-option {
-  border: none;
-  border-radius: 999px;
-  padding: 3px 7px;
-  font-size: 10px;
-  cursor: pointer;
-  background: #e5e7eb;
+.scribbit-panel-score {
+  font-size: 12px;
+  font-weight: 500;
   color: #111827;
 }
 
-.scribbit-panel-mute-option:hover {
-  background: #d1d5db;
+.scribbit-panel-disclaimer {
+  font-size: 11px;
+  color: #6b7280;
 }
 
-/* Responsive */
+/* Severity colors */
 
-@media (max-width: 480px) {
-  #scribbit-fairness-panel {
-    right: 8px;
-    left: 8px;
-    max-width: none;
-  }
+.scribbit-severity-high {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+  color: #b91c1c;
+}
+
+.scribbit-severity-medium {
+  background: rgba(249, 115, 22, 0.08);
+  border-color: #f97316;
+  color: #c2410c;
+}
+
+.scribbit-severity-low {
+  background: rgba(34, 197, 94, 0.08);
+  border-color: #22c55e;
+  color: #15803d;
+}
+
+.scribbit-severity-none {
+  background: rgba(148, 163, 184, 0.12);
+  border-color: #cbd5f5;
+  color: #475569;
+}
+
+/* Scrollbar subtle styling inside panel body/evidence */
+
+.scribbit-panel-body::-webkit-scrollbar,
+.scribbit-risk-evidence::-webkit-scrollbar {
+  width: 6px;
+}
+
+.scribbit-panel-body::-webkit-scrollbar-thumb,
+.scribbit-risk-evidence::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.7);
+  border-radius: 999px;
 }

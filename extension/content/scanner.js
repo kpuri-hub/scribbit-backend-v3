@@ -1,14 +1,21 @@
 // content/scanner.js
 // Scribbit Fairness Scanner - Page Scanner
 //
-// Adds:
-// - Airbnb dynamic fee extraction
-// - DOM mutation observer (for late-loaded Airbnb UI)
-// - Keeps all original architecture intact
+// Responsibilities:
+// - Decide *where* and *when* to run Scribbit scans
+// - Build a lightweight snapshot of the page
+// - Call ScribbitRiskEngine.evaluatePage(snapshot)
+// - Send results via ScribbitMessaging.sendScanComplete
+//
+// Phase 1 focus:
+// - Add domain guard so Scribbit never runs on inbox/docs/etc.
+// - Keep search engine guard
+// - Keep architecture simple and deterministic
 
 (function () {
   const MAX_TEXT_LENGTH = 50000;
 
+  // Search engines where we generally do NOT want to run Scribbit
   const SEARCH_ENGINE_HOSTS = [
     "www.google.com",
     "google.com",
@@ -19,158 +26,171 @@
     "www.duckduckgo.com"
   ];
 
+  // Domains where Scribbit should NEVER scan or show up.
+  // These are clearly personal/productivity contexts where a panel feels creepy.
+  const BLOCKED_DOMAINS = [
+    // Webmail
+    "mail.google.com",
+    "inbox.google.com",
+    "outlook.live.com",
+    "outlook.office.com",
+    "mail.yahoo.com",
+    "mail.aol.com",
+
+    // Docs & storage
+    "docs.google.com",
+    "drive.google.com",
+    "onedrive.live.com",
+    "www.dropbox.com",
+
+    // General productivity / collaboration (safe default)
+    "teams.microsoft.com",
+    "slack.com",
+    "app.slack.com",
+    "notion.so",
+    "www.notion.so"
+  ];
+
   function isSearchEngineHost(hostname) {
     return SEARCH_ENGINE_HOSTS.includes(hostname);
   }
 
-  /* -------------------------------------------------------
-   * Airbnb dynamic fee extraction
-   * ----------------------------------------------------- */
-  function extractAirbnbFees() {
-    const selectors = [
-      '[data-testid="price-breakdown-row"]',
-      '[data-testid="price-breakdown-item"]',
-      '[data-testid="fee-row"]',
-      '[data-section-id="BOOK_IT_SIDEBAR_PRICE"]',
-      'div[aria-label="Price details"]',
-      '._tt122m' // known Airbnb price section class (may change)
-    ];
-
-    let fees = [];
-
-    selectors.forEach(selector => {
-      document.querySelectorAll(selector).forEach(el => {
-        const txt = el.innerText || el.textContent || "";
-        if (txt.trim().length > 0) {
-          fees.push(txt.trim());
-        }
-      });
+  function isBlockedDomain(hostname) {
+    // Exact match or subdomain of a blocked domain
+    return BLOCKED_DOMAINS.some((blocked) => {
+      return (
+        hostname === blocked ||
+        hostname.endsWith("." + blocked)
+      );
     });
-
-    return fees;
   }
 
-  /* -------------------------------------------------------
-   * Core text extraction
-   * ----------------------------------------------------- */
-  function extractPageText() {
-    if (!document.body) return "";
-
-    // Avoid scanning Scribbit's own panel text (which appears in document.body)
-    const panel = document.getElementById("scribbit-fairness-panel");
-    const prevDisplay = panel ? panel.style.display : null;
-    if (panel) {
-      // Hide panel while we read innerText so its content isn't included
-      panel.style.display = "none";
+  // Build a lightweight snapshot for the risk engine.
+  // Keep it deterministic and capped in size.
+  function buildPageSnapshot() {
+    let text = "";
+    if (document.body) {
+      // innerText gives us the user-visible text; trim and cap length
+      text = (document.body.innerText || "").trim();
     }
 
-    const raw = document.body.innerText || "";
-
-    if (panel && prevDisplay !== null) {
-      panel.style.display = prevDisplay;
+    if (text.length > MAX_TEXT_LENGTH) {
+      text = text.slice(0, MAX_TEXT_LENGTH);
     }
-
-    return raw.length <= MAX_TEXT_LENGTH ? raw : raw.slice(0, MAX_TEXT_LENGTH);
-  }
-
-  function detectCurrencyMarkers(rawText) {
-    const markers = new Set();
-
-    const symbolMatches = rawText.match(/[$€£¥]/g);
-    if (symbolMatches) symbolMatches.forEach(s => markers.add(s));
-
-    const codeMatches = rawText.match(/\b(USD|CAD|EUR|GBP|AUD|NZD)\b/gi);
-    if (codeMatches) codeMatches.forEach(c => markers.add(c.toUpperCase()));
-
-    try {
-      if (
-        window.ScribbitCurrencyDetector &&
-        typeof window.ScribbitCurrencyDetector.detect === "function"
-      ) {
-        const extra = window.ScribbitCurrencyDetector.detect(rawText);
-        if (Array.isArray(extra)) extra.forEach(m => markers.add(m));
-      }
-    } catch (err) {
-      console.warn("[Scribbit] currencyDetector error:", err);
-    }
-
-    return Array.from(markers);
-  }
-
-  /* -------------------------------------------------------
-   * Snapshot builder
-   * ----------------------------------------------------- */
-  function buildSnapshot() {
-    const rawText = extractPageText();
-    const textNormalized = rawText.toLowerCase();
-
-    const airbnbFees = extractAirbnbFees();
 
     return {
       url: window.location.href,
-      textRaw: rawText,
-      textNormalized,
-      currencySymbolsDetected: detectCurrencyMarkers(rawText),
-      airbnbFees
+      hostname: window.location.hostname,
+      title: document.title || "",
+      text,
     };
   }
 
-  /* -------------------------------------------------------
-   * Scanning & messaging
-   * ----------------------------------------------------- */
-  async function runScan() {
-    const snapshot = buildSnapshot();
-    const riskResult = window.ScribbitRiskEngine.evaluatePage(snapshot);
-
-    try {
-      await window.ScribbitMessaging.sendScanComplete({
-        url: snapshot.url,
-        riskResult
-      });
-    } catch (err) {
-      console.error("[Scribbit] sendScanComplete error:", err);
-    }
-  }
-
-  function waitForDependencies(callback) {
+  // Wait until both ScribbitMessaging and ScribbitRiskEngine are available
+  function waitForDependencies(callback, maxTries = 30, delayMs = 200) {
     let tries = 0;
-    const max = 50;
-
     const interval = setInterval(() => {
       if (window.ScribbitMessaging && window.ScribbitRiskEngine) {
         clearInterval(interval);
         callback();
-      } else if (tries++ >= max) {
-        clearInterval(interval);
-        console.warn("[Scribbit] scanner.js: dependencies missing");
+        return;
       }
-    }, 200);
+
+      if (tries++ >= maxTries) {
+        clearInterval(interval);
+        console.warn(
+          "[Scribbit] scanner.js: dependencies not available after retries"
+        );
+        return;
+      }
+    }, delayMs);
   }
 
+  // Core scan routine: snapshot → risk engine → messaging
+  function runScan() {
+    try {
+      const snapshot = buildPageSnapshot();
+      const riskResult = window.ScribbitRiskEngine.evaluatePage(snapshot);
+
+      // Send results to background / popup / panel via messaging helper
+      window.ScribbitMessaging.sendScanComplete({
+        url: snapshot.url,
+        riskResult,
+      });
+    } catch (err) {
+      console.error("[Scribbit] scanner.js: error during runScan:", err);
+    }
+  }
+
+  // Initialize Scribbit on this page, respecting domain + search engine guards.
   function init() {
     const hostname = window.location.hostname;
-    if (isSearchEngineHost(hostname)) {
-      console.debug("[Scribbit] scanner: skipping search engine:", hostname);
+
+    // 1) Hard blocklist: never run on these domains.
+    if (isBlockedDomain(hostname)) {
+      console.debug(
+        "[Scribbit] scanner.js: Skipping scan on blocked domain:",
+        hostname
+      );
       return;
     }
 
+    // 2) Skip generic search engine results pages.
+    if (isSearchEngineHost(hostname)) {
+      console.debug(
+        "[Scribbit] scanner.js: Skipping scan on search engine host:",
+        hostname
+      );
+      return;
+    }
+
+    // 3) Wait for messaging + risk engine, then scan once.
     waitForDependencies(() => {
       runScan();
 
-      // Re-scan when Airbnb loads dynamic fees (3-second window)
-      const observer = new MutationObserver(() => {
-        runScan();
-      });
+      // Optional: light SPA support (e.g., Booking/Airbnb dynamic updates).
+      // We set up a short-lived MutationObserver that can trigger ONE extra scan
+      // if the DOM changes significantly right after initial load.
+      let hasRescanned = false;
+      const observerTimeoutMs = 3000;
 
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true
-      });
+      try {
+        const observer = new MutationObserver((mutations) => {
+          if (hasRescanned) return;
 
-      setTimeout(() => observer.disconnect(), 3000);
+          let significantChange = false;
+          for (const m of mutations) {
+            if (m.addedNodes && m.addedNodes.length > 0) {
+              significantChange = true;
+              break;
+            }
+          }
+
+          if (significantChange) {
+            hasRescanned = true;
+            runScan();
+          }
+        });
+
+        if (document.body) {
+          observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+          });
+
+          // Disconnect after a short window so we don't watch forever.
+          setTimeout(() => observer.disconnect(), observerTimeoutMs);
+        }
+      } catch (err) {
+        console.warn(
+          "[Scribbit] scanner.js: MutationObserver setup failed:",
+          err
+        );
+      }
     });
   }
 
+  // DOMContentLoaded guard
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
   } else {

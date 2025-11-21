@@ -1,5 +1,23 @@
 // ui/panel.js
-// Scribbit Fairness Scanner - On-page Panel (Risk v2 UI)
+// Scribbit Fairness Scanner - On-page Panel (Risk v2 UI with Mini Mode)
+//
+// Behaviour:
+// - ONLY shows if there is at least 1 risk overall (no "flash on every page")
+// - Renders 4 categories (Financial, Data, Content, Legal) when visible
+// - Each category shows: name, severity, bar, and # of issues
+// - Clicking a category header toggles expand/collapse of its issues
+// - Each risk card can show evidence in an expandable details area
+// - Panel has a close button that hides it completely for this page load
+// - NEW: Panel supports FULL vs MINI mode, toggled by clicking the header
+// - NEW: Panel remembers FULL/MINI per-domain in chrome.storage.local
+//
+// It consumes the Risk Engine result object:
+//   {
+//     risks: [ { id, category, title, description, severity, evidence?, ... }, ... ],
+//     categoryScores: { financial, data_privacy, content_ip, legal_rights },
+//     riskScore,
+//     overallLevel
+//   }
 
 (function () {
   const PANEL_ID = "scribbit-fairness-panel";
@@ -13,56 +31,16 @@
     legal_rights: "Legal Rights & Control"
   };
 
+  const PANEL_STATE_STORAGE_KEY = "scribbit_panel_state_v1";
+
   // Track if user manually closed the panel for this page
   let panelManuallyHidden = false;
+  // Track current mode: "full" or "mini"
+  let currentPanelMode = "full";
+  let panelModeInitialized = false;
 
   // ----- Small helpers ------------------------------------------------------
 
-  function severityFromScore(score) {
-    if (typeof score !== "number") return "none";
-    if (score >= 70) return "high";
-    if (score >= 40) return "med";
-    if (score > 0) return "low";
-    return "none";
-  }
-
-  function severityLabel(sev) {
-    switch (sev) {
-      case "high":
-        return "High";
-      case "med":
-      case "medium":
-        return "Medium";
-      case "low":
-        return "Low";
-      default:
-        return "No issues";
-    }
-  }
-
-  function countLabel(count) {
-    if (!count || count <= 0) return "No issues";
-    if (count === 1) return "1 issue";
-    return `${count} issues`;
-  }
-
-  function getRiskDescription(risk) {
-    if (risk && risk.description) return risk.description;
-
-    try {
-      const model = window.ScribbitRiskModel;
-      if (model && model.RISK_CARDS && risk && risk.id) {
-        const card = model.RISK_CARDS[risk.id];
-        if (card && card.defaultDescription) return card.defaultDescription;
-      }
-    } catch (e) {
-      // ignore lookup failures
-    }
-
-    return "No detailed explanation available for this risk yet.";
-  }
-
-  // Normalize whatever background sends us into a riskResult object
   function normalizeRiskResult(maybe) {
     if (!maybe) return null;
     if (maybe.riskResult) return maybe.riskResult;
@@ -89,165 +67,108 @@
     return grouped;
   }
 
-  /**
-   * Risk-specific tweak helpers
-   */
-
-  function refineUltraShortCancellationText(txt) {
-    // Prefer the sentence that talks about 24 hours / 1 day
-    const lower = txt.toLowerCase();
-    const keyIndex = lower.indexOf("24 hours");
-    if (keyIndex === -1) return txt;
-
-    // Find sentence start (previous period or start)
-    let start = txt.lastIndexOf(".", keyIndex);
-    if (start === -1) start = 0; else start += 1;
-
-    // Find sentence end (next period, or end)
-    let end = txt.indexOf(".", keyIndex);
-    if (end === -1) end = txt.length; else end += 1;
-
-    let slice = txt.slice(start, end).trim();
-    if (!slice) return txt;
-    return slice;
-  }
-
-  function refineResortFeeText(txt) {
-    // Prefer the sentence that mentions "resort fee" / "facility fee" / "service fees"
-    const lower = txt.toLowerCase();
-    const markers = ["resort fee", "facility fee", "service fees", "not include a resort"];
-    let keyIndex = -1;
-    for (const m of markers) {
-      const idx = lower.indexOf(m);
-      if (idx !== -1) {
-        keyIndex = idx;
-        break;
-      }
+  function summarizeCategorySeverity(risks) {
+    if (!risks || risks.length === 0) return "none";
+    // Severity precedence: high > medium > low
+    let hasHigh = false;
+    let hasMedium = false;
+    for (const r of risks) {
+      const sev = String(r.severity || "").toLowerCase();
+      if (sev === "high") hasHigh = true;
+      else if (sev === "medium") hasMedium = true;
     }
-    if (keyIndex === -1) return txt;
-
-    let start = txt.lastIndexOf(".", keyIndex);
-    if (start === -1) start = 0; else start += 1;
-
-    let end = txt.indexOf(".", keyIndex);
-    if (end === -1) end = txt.length; else end += 1;
-
-    const slice = txt.slice(start, end).trim();
-    return slice || txt;
+    if (hasHigh) return "high";
+    if (hasMedium) return "medium";
+    return "low";
   }
 
-  /**
-   * Take raw risk.evidence and turn it into one concise, readable bullet:
-   * - trimmed
-   * - deduped (case-insensitive)
-   * - stripped of risk title / "Why is this risky?" / obvious UI noise
-   * - risk-specific refinement for some cards
-   * - discount / promo lines are skipped for "extra fees" style risks
-   */
-  function buildEvidenceLines(risk) {
-    const rawLines = Array.isArray(risk && risk.evidence) ? risk.evidence : [];
-    const result = [];
-    const seen = new Set();
+  function severityLabel(level) {
+    switch (String(level || "").toLowerCase()) {
+      case "high":
+        return "High";
+      case "medium":
+        return "Medium";
+      case "low":
+        return "Low";
+      default:
+        return "No issues";
+    }
+  }
 
-    if (!rawLines.length) return result;
+  function severityClass(level) {
+    switch (String(level || "").toLowerCase()) {
+      case "high":
+        return "scribbit-severity-high";
+      case "medium":
+        return "scribbit-severity-medium";
+      case "low":
+        return "scribbit-severity-low";
+      default:
+        return "scribbit-severity-none";
+    }
+  }
 
-    const title = (risk && risk.title) ? String(risk.title) : "";
-    const titleLower = title.toLowerCase();
+  function countLabel(count) {
+    if (!count || count <= 0) return "No issues";
+    if (count === 1) return "1 issue";
+    return `${count} issues`;
+  }
 
-    const isUltraShort =
-      /ultra[\s-]*short/i.test(titleLower) ||
-      /24[-\s]*hour/.test(titleLower);
-    const isResortFee =
-      /resort/i.test(titleLower) ||
-      /facility fee/i.test(titleLower);
-    const isExtraFees =
-      /extra fees/i.test(titleLower) ||
-      /not in base price/i.test(titleLower);
+  function getHostname() {
+    try {
+      return window.location.hostname || "";
+    } catch {
+      return "";
+    }
+  }
 
-    rawLines.forEach((raw) => {
-      if (typeof raw !== "string") return;
-      let txt = raw;
+  // ----- Storage for per-domain panel mode ----------------------------------
 
-      // Strip the risk title if it appears inside the snippet
-      if (title) {
-        try {
-          const reTitle = new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-          txt = txt.replace(reTitle, " ");
-        } catch (e) {
-          // ignore if regex fails
-        }
-      }
+  function loadDomainPanelState(callback) {
+    const hostname = getHostname();
+    if (!hostname || !chrome || !chrome.storage || !chrome.storage.local) {
+      callback(null);
+      return;
+    }
 
-      // Strip any "Why is this risky?" fragments
-      txt = txt.replace(/why is this risky\??/gi, " ");
-
-      // Strip common UI-ish noise tokens
-      txt = txt.replace(/\bNO ISSUES\b/gi, " ");
-      txt = txt.replace(/\b[0-9]+\s*issues?\b/gi, " ");
-      txt = txt.replace(/\bFinancial Exposure\b/gi, " ");
-      txt = txt.replace(/\bPersonal Data & Privacy\b/gi, " ");
-      txt = txt.replace(/\bContent & Image Rights\b/gi, " ");
-      txt = txt.replace(/\bLegal Rights & Control\b/gi, " ");
-      txt = txt.replace(/\brisk\s*\(\d+\/\d+\)\b/gi, " ");
-
-      // Remove leading bullets/plus signs
-      txt = txt.replace(/^[+\-•–\s]+/, "");
-
-      // Collapse whitespace
-      txt = txt.replace(/\s+/g, " ").trim();
-      if (!txt) return;
-
-      // Skip obvious discount / promo snippets for extra-fee-like risks
-      if (isExtraFees) {
-        const lower = txt.toLowerCase();
-        if (
-          lower.includes("discount") ||
-          lower.includes("genius") ||
-          lower.includes("% off") ||
-          lower.includes("promotion") ||
-          lower.includes("promo") ||
-          lower.includes("save ")
-        ) {
+    chrome.storage.local.get([PANEL_STATE_STORAGE_KEY], (result) => {
+      try {
+        const stored = result && result[PANEL_STATE_STORAGE_KEY];
+        if (!stored || typeof stored !== "object") {
+          callback(null);
           return;
         }
-      }
-
-      // Risk-specific refinement
-      if (isUltraShort) {
-        txt = refineUltraShortCancellationText(txt);
-      } else if (isResortFee) {
-        txt = refineResortFeeText(txt);
-      }
-
-      // Try to keep only the first sentence if it's reasonably long
-      const periodIndex = txt.indexOf(". ");
-      if (periodIndex > 40 && periodIndex < 180) {
-        txt = txt.slice(0, periodIndex + 1);
-      }
-
-      // Soft-truncate very long snippets
-      const MAX_LEN = 180;
-      if (txt.length > MAX_LEN) {
-        let cut = txt.slice(0, MAX_LEN - 1);
-        const lastSpace = cut.lastIndexOf(" ");
-        if (lastSpace > 40) {
-          cut = cut.slice(0, lastSpace);
+        const mode = stored[hostname];
+        if (mode === "mini" || mode === "full") {
+          callback(mode);
+        } else {
+          callback(null);
         }
-        txt = cut + "…";
+      } catch (e) {
+        console.warn("[Scribbit] panel.js: error reading panel state:", e);
+        callback(null);
       }
-
-      const key = txt.toLowerCase();
-      if (seen.has(key)) return;
-      seen.add(key);
-      result.push(txt);
     });
-
-    // At most 1–2 bullets to keep things readable
-    if (result.length > 2) return result.slice(0, 2);
-    return result;
   }
 
-  // ----- DOM creation / wiring ---------------------------------------------
+  function saveDomainPanelState(mode) {
+    const hostname = getHostname();
+    if (!hostname || !chrome || !chrome.storage || !chrome.storage.local) {
+      return;
+    }
+    if (mode !== "mini" && mode !== "full") return;
+
+    chrome.storage.local.get([PANEL_STATE_STORAGE_KEY], (result) => {
+      let stored = (result && result[PANEL_STATE_STORAGE_KEY]) || {};
+      if (typeof stored !== "object") stored = {};
+      stored[hostname] = mode;
+      chrome.storage.local.set({ [PANEL_STATE_STORAGE_KEY]: stored }, () => {
+        // best-effort; no need to handle callback
+      });
+    });
+  }
+
+  // ----- DOM creation / wiring ----------------------------------------------
 
   function injectStylesheet() {
     if (document.querySelector('link[data-scribbit-panel-css="1"]')) return;
@@ -258,14 +179,52 @@
     document.head.appendChild(link);
   }
 
+  function setPanelMode(panel, mode) {
+    if (!panel) return;
+    if (mode !== "mini" && mode !== "full") return;
+
+    currentPanelMode = mode;
+    panel.classList.remove("scribbit-panel-mini", "scribbit-panel-full");
+    if (mode === "mini") {
+      panel.classList.add("scribbit-panel-mini");
+    } else {
+      panel.classList.add("scribbit-panel-full");
+    }
+    saveDomainPanelState(mode);
+  }
+
+  function togglePanelMode(panel) {
+    if (!panel) return;
+    const next = currentPanelMode === "mini" ? "full" : "mini";
+    setPanelMode(panel, next);
+  }
+
+  function applyInitialPanelMode(panel) {
+    if (panelModeInitialized) {
+      // We already applied state; just re-apply currentPanelMode to be safe.
+      setPanelMode(panel, currentPanelMode);
+      return;
+    }
+
+    panelModeInitialized = true;
+
+    loadDomainPanelState((mode) => {
+      if (mode === "mini" || mode === "full") {
+        setPanelMode(panel, mode);
+      } else {
+        // Default is full for domains where we haven't stored anything yet.
+        setPanelMode(panel, "full");
+      }
+    });
+  }
+
   function createPanelShell() {
     let panel = document.getElementById(PANEL_ID);
     if (panel) return panel;
 
     panel = document.createElement("div");
     panel.id = PANEL_ID;
-    // Start hidden; we'll show it explicitly in updatePanel when there are risks
-    panel.style.display = "none";
+    panel.style.display = "none"; // we show it explicitly in updatePanel
 
     // Header
     const header = document.createElement("div");
@@ -274,22 +233,17 @@
     const headerLeft = document.createElement("div");
     headerLeft.className = "scribbit-panel-header-left";
 
-    const logo = document.createElement("div");
-    logo.className = "scribbit-panel-logo";
-    logo.textContent = "S";
-
     const title = document.createElement("div");
     title.className = "scribbit-panel-title";
-    title.textContent = "Scribbit scan";
+    title.textContent = "Scribbit Scan";
 
-    const summary = document.createElement("div");
-    summary.className = "scribbit-panel-summary";
-    summary.id = "scribbit-panel-summary";
-    summary.textContent = "Analyzing this page…";
+    const subtitle = document.createElement("div");
+    subtitle.className = "scribbit-panel-subtitle";
+    subtitle.id = "scribbit-panel-summary";
+    subtitle.textContent = ""; // filled dynamically
 
-    headerLeft.appendChild(logo);
     headerLeft.appendChild(title);
-    headerLeft.appendChild(summary);
+    headerLeft.appendChild(subtitle);
 
     const headerRight = document.createElement("div");
     headerRight.className = "scribbit-panel-header-right";
@@ -300,7 +254,8 @@
     closeBtn.innerHTML = "×";
     closeBtn.title = "Hide Scribbit for this page";
 
-    closeBtn.addEventListener("click", () => {
+    closeBtn.addEventListener("click", (evt) => {
+      evt.stopPropagation(); // don’t toggle mini/full when clicking close
       panelManuallyHidden = true;
       panel.style.display = "none";
     });
@@ -309,6 +264,14 @@
 
     header.appendChild(headerLeft);
     header.appendChild(headerRight);
+
+    // Clicking the header (but not the close button) toggles mini/full
+    header.addEventListener("click", (evt) => {
+      if (evt.target.closest(".scribbit-panel-close")) {
+        return;
+      }
+      togglePanelMode(panel);
+    });
 
     // Body
     const body = document.createElement("div");
@@ -320,46 +283,58 @@
 
     body.appendChild(categoryList);
 
+    // Footer
+    const footer = document.createElement("div");
+    footer.className = "scribbit-panel-footer";
+
+    const riskScoreEl = document.createElement("div");
+    riskScoreEl.className = "scribbit-panel-score";
+    riskScoreEl.id = "scribbit-panel-score";
+    riskScoreEl.textContent = ""; // filled dynamically
+
+    const disclaimer = document.createElement("div");
+    disclaimer.className = "scribbit-panel-disclaimer";
+    disclaimer.textContent =
+      "Scribbit scans for common fees, refund traps and legal gotchas. It can miss things — always review before you buy.";
+
+    footer.appendChild(riskScoreEl);
+    footer.appendChild(disclaimer);
+
     panel.appendChild(header);
     panel.appendChild(body);
+    panel.appendChild(footer);
 
     document.body.appendChild(panel);
+
+    // Apply persisted mode once panel exists
+    applyInitialPanelMode(panel);
+
     return panel;
   }
 
-  function renderCategoryCard(container, categoryId, categoryInfo) {
-    const { score, risks } = categoryInfo;
-    const sev = severityFromScore(score);
-    const sevLabel = severityLabel(sev);
-    const issuesCount = risks.length;
-
+  function createCategoryCard(categoryKey, risks) {
     const card = document.createElement("div");
     card.className = "scribbit-category-card";
-    card.dataset.categoryId = categoryId;
+    card.dataset.category = categoryKey;
 
     const header = document.createElement("div");
     header.className = "scribbit-category-header";
 
     const nameEl = document.createElement("div");
     nameEl.className = "scribbit-category-name";
-    nameEl.textContent = CATEGORY_LABELS[categoryId] || categoryId;
+    nameEl.textContent = CATEGORY_LABELS[categoryKey] || categoryKey;
 
     const headerRight = document.createElement("div");
-    headerRight.style.display = "flex";
-    headerRight.style.alignItems = "center";
-    headerRight.style.gap = "6px";
+    headerRight.className = "scribbit-category-header-right";
 
-    const levelEl = document.createElement("div");
-    levelEl.className = "scribbit-category-level";
-    levelEl.textContent = sevLabel;
-    if (sev === "high") levelEl.classList.add("scribbit-category-level-high");
-    else if (sev === "med") levelEl.classList.add("scribbit-category-level-med");
-    else if (sev === "low") levelEl.classList.add("scribbit-category-level-low");
-    else levelEl.classList.add("scribbit-category-level-none");
+    const level = summarizeCategorySeverity(risks);
+    const levelEl = document.createElement("span");
+    levelEl.className = "scribbit-category-level " + severityClass(level);
+    levelEl.textContent = severityLabel(level);
 
-    const countEl = document.createElement("div");
-    countEl.className = "scribbit-category-risk-block-count";
-    countEl.textContent = countLabel(issuesCount);
+    const countEl = document.createElement("span");
+    countEl.className = "scribbit-category-count";
+    countEl.textContent = countLabel(risks.length);
 
     const toggle = document.createElement("button");
     toggle.type = "button";
@@ -376,131 +351,162 @@
 
     // Bar
     const barOuter = document.createElement("div");
-    barOuter.className = "scribbit-category-bar";
+    barOuter.className = "scribbit-category-bar-outer";
 
-    const barFill = document.createElement("div");
-    barFill.className = "scribbit-category-bar-fill";
+    const barInner = document.createElement("div");
+    barInner.className = "scribbit-category-bar-inner " + severityClass(level);
 
-    if (sev === "high") barFill.classList.add("scribbit-category-bar-high");
-    else if (sev === "med") barFill.classList.add("scribbit-category-bar-med");
-    else if (sev === "low") barFill.classList.add("scribbit-category-bar-low");
-    else barFill.classList.add("scribbit-category-bar-none");
+    // Simple bar width heuristic
+    let widthPercent = 0;
+    if (risks.length > 0) {
+      if (level === "high") widthPercent = 100;
+      else if (level === "medium") widthPercent = 66;
+      else widthPercent = 33;
+    }
+    barInner.style.width = widthPercent + "%";
 
-    const clampedScore =
-      typeof score === "number" ? Math.max(0, Math.min(100, score)) : 0;
-    barFill.style.width = `${clampedScore}%`;
+    barOuter.appendChild(barInner);
 
-    barOuter.appendChild(barFill);
+    // Issues list
+    const issuesList = document.createElement("div");
+    issuesList.className = "scribbit-category-issues";
 
-    // Body
-    const body = document.createElement("div");
-    body.className = "scribbit-category-risk-block";
-    body.dataset.expanded = issuesCount > 0 ? "1" : "0";
-
-    if (issuesCount > 0) {
+    if (risks.length > 0) {
       risks.forEach((risk) => {
-        const riskRow = document.createElement("div");
-        riskRow.className = "scribbit-category-risk-block-item";
-
-        const titleRow = document.createElement("div");
-        titleRow.className = "scribbit-category-risk-title-row";
-
-        const title = document.createElement("div");
-        title.className = "scribbit-risk-title";
-        title.textContent = risk.title || risk.label || "Untitled risk";
-
-        const whyWrap = document.createElement("div");
-        whyWrap.className = "scribbit-risk-why-wrapper";
-
-        const whyBtn = document.createElement("button");
-        whyBtn.type = "button";
-        whyBtn.className = "scribbit-risk-why";
-        whyBtn.textContent = "Why is this risky?";
-
-        const tooltip = document.createElement("div");
-        tooltip.className = "scribbit-risk-tooltip";
-        tooltip.textContent = getRiskDescription(risk);
-        tooltip.style.display = "none";
-
-        // Keep tooltip behavior separate from evidence expansion
-        whyBtn.addEventListener("click", (evt) => {
-          evt.stopPropagation();
-          const visible = tooltip.style.display === "block";
-          tooltip.style.display = visible ? "none" : "block";
-        });
-
-        whyWrap.appendChild(whyBtn);
-        whyWrap.appendChild(tooltip);
-
-        titleRow.appendChild(title);
-        titleRow.appendChild(whyWrap);
-
-        riskRow.appendChild(titleRow);
-
-        // Evidence block (click risk row → toggle evidence)
-        const evidenceLines = buildEvidenceLines(risk);
-        if (evidenceLines.length > 0) {
-          const evidenceContainer = document.createElement("div");
-          evidenceContainer.className = "scribbit-risk-evidence";
-
-          const evidenceList = document.createElement("ul");
-          evidenceList.className = "scribbit-risk-evidence-list";
-
-          evidenceLines.forEach((line) => {
-            const li = document.createElement("li");
-            li.textContent = line;
-            evidenceList.appendChild(li);
-          });
-
-          if (evidenceList.children.length > 0) {
-            evidenceContainer.appendChild(evidenceList);
-            riskRow.appendChild(evidenceContainer);
-
-            riskRow.addEventListener("click", () => {
-              const isExpanded = evidenceContainer.classList.contains("expanded");
-              if (isExpanded) {
-                evidenceContainer.classList.remove("expanded");
-              } else {
-                evidenceContainer.classList.add("expanded");
-              }
-            });
-          }
-        }
-
-        body.appendChild(riskRow);
+        issuesList.appendChild(createRiskItem(risk));
       });
     } else {
       const empty = document.createElement("div");
-      empty.className = "scribbit-category-risk-block-empty";
-      empty.textContent = "No significant issues detected in this category.";
-      body.appendChild(empty);
+      empty.className = "scribbit-category-empty";
+      empty.textContent = "No notable issues found in this area.";
+      issuesList.appendChild(empty);
     }
-
-    // Initial collapse state: expanded if there are issues, collapsed otherwise
-    if (issuesCount <= 0) {
-      body.style.display = "none";
-      toggle.textContent = "▸";
-    }
-
-    // Toggle expand/collapse for category
-    toggle.addEventListener("click", (evt) => {
-      evt.stopPropagation();
-      const isHidden = body.style.display === "none";
-      body.style.display = isHidden ? "block" : "none";
-      toggle.textContent = isHidden ? "▾" : "▸";
-    });
 
     card.appendChild(header);
     card.appendChild(barOuter);
-    card.appendChild(body);
+    card.appendChild(issuesList);
 
-    container.appendChild(card);
+    // Collapse/expand behaviour
+    let expanded = risks.length > 0; // default expanded if there are issues
+    updateCategoryExpandedState(card, expanded);
+
+    header.addEventListener("click", (evt) => {
+      // Don’t re-toggle if click came from the toggle button itself; but behavior is same
+      expanded = !expanded;
+      updateCategoryExpandedState(card, expanded);
+    });
+
+    toggle.addEventListener("click", (evt) => {
+      evt.stopPropagation();
+      expanded = !expanded;
+      updateCategoryExpandedState(card, expanded);
+    });
+
+    return card;
   }
 
-  function updatePanel(riskResultRaw) {
-    const riskResult = normalizeRiskResult(riskResultRaw);
-    console.log("[Scribbit] Panel received riskResult:", riskResult);
+  function updateCategoryExpandedState(card, expanded) {
+    if (!card) return;
+    const issuesList = card.querySelector(".scribbit-category-issues");
+    const toggle = card.querySelector(".scribbit-category-toggle");
+    if (!issuesList || !toggle) return;
 
+    if (expanded) {
+      card.classList.remove("scribbit-category-collapsed");
+      issuesList.style.display = "block";
+      toggle.textContent = "▾";
+    } else {
+      card.classList.add("scribbit-category-collapsed");
+      issuesList.style.display = "none";
+      toggle.textContent = "▸";
+    }
+  }
+
+  function createRiskItem(risk) {
+    const item = document.createElement("div");
+    item.className = "scribbit-risk-item";
+
+    const titleRow = document.createElement("div");
+    titleRow.className = "scribbit-risk-title-row";
+
+    const title = document.createElement("div");
+    title.className = "scribbit-risk-title";
+    title.textContent = risk.title || "Risk";
+
+    const chip = document.createElement("span");
+    chip.className = "scribbit-risk-severity " + severityClass(risk.severity);
+    chip.textContent = severityLabel(risk.severity);
+
+    const whyBtn = document.createElement("button");
+    whyBtn.className = "scribbit-risk-why";
+    whyBtn.type = "button";
+    whyBtn.textContent = "Why is this risky?";
+
+    titleRow.appendChild(title);
+    titleRow.appendChild(chip);
+    titleRow.appendChild(whyBtn);
+
+    const desc = document.createElement("div");
+    desc.className = "scribbit-risk-description";
+    desc.textContent = risk.description || "";
+
+    // Evidence block
+    const evidenceContainer = document.createElement("div");
+    evidenceContainer.className = "scribbit-risk-evidence-container";
+
+    const evidenceToggle = document.createElement("button");
+    evidenceToggle.type = "button";
+    evidenceToggle.className = "scribbit-risk-evidence-toggle";
+    evidenceToggle.textContent = "Show details ▾";
+
+    const evidenceList = document.createElement("ul");
+    evidenceList.className = "scribbit-risk-evidence";
+    evidenceList.style.display = "none";
+
+    const evidence = Array.isArray(risk.evidence) ? risk.evidence : [];
+    if (evidence.length > 0) {
+      evidence.forEach((snippet) => {
+        const li = document.createElement("li");
+        li.textContent = snippet;
+        evidenceList.appendChild(li);
+      });
+    } else {
+      const li = document.createElement("li");
+      li.textContent = "No specific lines were extracted, but language on this page matched this risk.";
+      evidenceList.appendChild(li);
+    }
+
+    let evidenceExpanded = false;
+    evidenceToggle.addEventListener("click", () => {
+      evidenceExpanded = !evidenceExpanded;
+      if (evidenceExpanded) {
+        evidenceList.style.display = "block";
+        evidenceToggle.textContent = "Hide details ▴";
+      } else {
+        evidenceList.style.display = "none";
+        evidenceToggle.textContent = "Show details ▾";
+      }
+    });
+
+    evidenceContainer.appendChild(evidenceToggle);
+    evidenceContainer.appendChild(evidenceList);
+
+    item.appendChild(titleRow);
+    item.appendChild(desc);
+    item.appendChild(evidenceContainer);
+
+    // Keep "Why is this risky?" simple: scrolls to description/evidence
+    whyBtn.addEventListener("click", () => {
+      desc.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+
+    return item;
+  }
+
+  // ----- Main update/render --------------------------------------------------
+
+  function updatePanel(rawRiskResult) {
+    const riskResult = normalizeRiskResult(rawRiskResult);
     const existingPanel = document.getElementById(PANEL_ID);
 
     // If the user manually closed the panel for this page, never show it again.
@@ -522,41 +528,56 @@
     const panelEl = existingPanel || createPanelShell();
     panelEl.style.display = "block";
 
+    // Make sure mode is applied (especially if the panel just got created)
+    applyInitialPanelMode(panelEl);
+
     const summaryEl = panelEl.querySelector("#scribbit-panel-summary");
-    const overallLevel = String(riskResult.overallLevel || "").toUpperCase();
+    const scoreEl = panelEl.querySelector("#scribbit-panel-score");
+    const categoryList = panelEl.querySelector("#scribbit-category-list");
+
+    const overallLevel = String(riskResult.overallLevel || "").toLowerCase();
     const riskScore =
-      typeof riskResult.riskScore === "number" ? riskResult.riskScore : 0;
+      typeof riskResult.riskScore === "number" ? riskResult.riskScore : null;
 
     if (summaryEl) {
-      if (overallLevel === "HIGH") {
-        summaryEl.textContent = `High overall risk (${riskScore}/100)`;
-      } else if (overallLevel === "MEDIUM") {
-        summaryEl.textContent = `Medium overall risk (${riskScore}/100)`;
-      } else if (overallLevel === "LOW") {
-        summaryEl.textContent = `Low overall risk (${riskScore}/100)`;
+      let levelLabel = severityLabel(overallLevel);
+      if (!riskScore && levelLabel === "No issues") {
+        summaryEl.textContent = "Some terms on this page may deserve a closer look.";
+      } else if (!riskScore) {
+        summaryEl.textContent = `Overall risk: ${levelLabel}`;
       } else {
-        summaryEl.textContent = `Risk score: ${riskScore}/100`;
+        summaryEl.textContent = `Overall risk: ${levelLabel} (${riskScore}/100)`;
       }
     }
 
-    const categoryList = panelEl.querySelector("#scribbit-category-list");
-    if (!categoryList) return;
+    if (scoreEl) {
+      if (riskScore != null) {
+        scoreEl.textContent = `Scribbit Risk Score: ${riskScore}/100`;
+      } else {
+        scoreEl.textContent = "";
+      }
+    }
 
-    categoryList.innerHTML = "";
+    if (categoryList) {
+      // Clear old content
+      while (categoryList.firstChild) {
+        categoryList.removeChild(categoryList.firstChild);
+      }
 
-    const categoryScores = riskResult.categoryScores || {};
-    const grouped = groupRisksByCategory(riskResult);
+      const grouped = groupRisksByCategory(riskResult);
 
-    CATEGORY_ORDER.forEach((catId) => {
-      const score = categoryScores[catId] || 0;
-      const risks = grouped[catId] || [];
-      renderCategoryCard(categoryList, catId, { score, risks });
-    });
+      CATEGORY_ORDER.forEach((catKey) => {
+        const catRisks = grouped[catKey] || [];
+        const card = createCategoryCard(catKey, catRisks);
+        categoryList.appendChild(card);
+      });
+    }
   }
 
-  // ----- Init / wiring to messaging ----------------------------------------
+  // ----- Wiring to ScribbitMessaging ----------------------------------------
 
   function init() {
+    // Make sure we're only running in top frame
     if (window.top !== window.self) return;
 
     if (!window.ScribbitMessaging) {
