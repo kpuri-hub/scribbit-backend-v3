@@ -4,7 +4,7 @@
 // Responsibilities:
 // - Build a normalized snapshot of the page text
 // - Add Airbnb-specific fee extraction & currency markers
-// - Decide WHEN to scan (skip search engines, blocked domains)
+// - Decide WHEN to scan (skip search engines, blocked domains, certain search results pages)
 // - Call ScribbitRiskEngine.evaluatePage(snapshot)
 // - Send results via ScribbitMessaging.sendScanComplete
 //
@@ -57,6 +57,22 @@
     return BLOCKED_DOMAINS.some((blocked) => {
       return hostname === blocked || hostname.endsWith("." + blocked);
     });
+  }
+
+  /**
+   * Very targeted: detect search results pages we NEVER want to scan.
+   * For now: Booking.com search results (e.g. ...booking.com/searchresults...)
+   */
+  function isSearchResultsPage(hostname, url) {
+    const host = (hostname || "").toLowerCase();
+    const href = (url || "").toLowerCase();
+
+    // Booking.com search results (e.g. https://www.booking.com/searchresults.html?...)
+    if (host.endsWith("booking.com") && href.includes("searchresults")) {
+      return true;
+    }
+
+    return false;
   }
 
   function extractPageText() {
@@ -205,6 +221,7 @@
 
   function init() {
     const hostname = window.location.hostname;
+    const url = window.location.href;
 
     if (isBlockedDomain(hostname)) {
       console.debug("[Scribbit] scanner: skipping blocked domain:", hostname);
@@ -213,6 +230,11 @@
 
     if (isSearchEngineHost(hostname)) {
       console.debug("[Scribbit] scanner: skipping search engine:", hostname);
+      return;
+    }
+
+    if (isSearchResultsPage(hostname, url)) {
+      console.debug("[Scribbit] scanner: skipping search results page:", url);
       return;
     }
 
