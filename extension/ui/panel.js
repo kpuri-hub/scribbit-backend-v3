@@ -10,7 +10,6 @@
 // - Panel has a close button that hides it completely for this page load
 // - Panel supports FULL vs MINI mode, toggled by clicking the header
 // - Panel remembers FULL/MINI per-domain in chrome.storage.local
-// - Panel does NOT flash full then mini; it only appears after mode is applied
 //
 // It consumes the Risk Engine result object:
 //   {
@@ -34,9 +33,8 @@
 
   const PANEL_STATE_STORAGE_KEY = "scribbit_panel_state_v1";
 
-  // Track if user manually closed the panel for this page
   let panelManuallyHidden = false;
-  // Start in MINI mode by default to avoid full → mini flash
+  // Default to MINI (safer visually) until we load real value from storage
   let currentPanelMode = "mini";
   let panelModeInitialized = false;
 
@@ -199,33 +197,24 @@
     setPanelMode(panel, next);
   }
 
-  /**
-   * Apply initial full/mini mode for this domain, then call onReady.
-   * This is async due to chrome.storage, so we only show the panel
-   * AFTER this has completed to avoid a flash of full → mini.
-   */
-  function applyInitialPanelMode(panel, onReady) {
-    if (!panel) {
-      if (onReady) onReady();
-      return;
-    }
+  function applyInitialPanelMode(panel) {
+    if (!panel) return;
 
     if (panelModeInitialized) {
       setPanelMode(panel, currentPanelMode);
-      if (onReady) onReady();
       return;
     }
 
     panelModeInitialized = true;
 
+    // Start as mini visually to avoid full → mini flash
+    setPanelMode(panel, "mini");
+
     loadDomainPanelState((mode) => {
       if (mode === "mini" || mode === "full") {
         setPanelMode(panel, mode);
-      } else {
-        // default for domains with no stored state → MINI to avoid full flash
-        setPanelMode(panel, "mini");
       }
-      if (onReady) onReady();
+      // If null, we just keep the default "mini" for new domains
     });
   }
 
@@ -235,7 +224,8 @@
 
     panel = document.createElement("div");
     panel.id = PANEL_ID;
-    panel.style.display = "none"; // we'll show it after mode is applied
+    panel.style.display = "none"; // we'll show it in updatePanel
+    panel.classList.add("scribbit-panel-mini"); // default mini until we know better
 
     // Header
     const header = document.createElement("div");
@@ -312,6 +302,8 @@
     panel.appendChild(header);
     panel.appendChild(body);
     panel.appendChild(footer);
+
+    document.body.appendChild(panel);
 
     return panel;
   }
@@ -562,10 +554,9 @@
       });
     }
 
-    // Only show the panel after mode is applied so we don't flash full → mini
-    applyInitialPanelMode(panelEl, () => {
-      panelEl.style.display = "block";
-    });
+    // Apply stored mini/full mode and show the panel
+    applyInitialPanelMode(panelEl);
+    panelEl.style.display = "block";
   }
 
   // ----- Dependency waiting & wiring ----------------------------------------
