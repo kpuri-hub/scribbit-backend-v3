@@ -2,14 +2,15 @@
 // Scribbit Fairness Scanner - On-page Panel (Risk v2 UI with Mini Mode)
 //
 // Behaviour:
-// - ONLY shows if there is at least 1 risk overall (no "flash on every page")
+// - ONLY shows if there is at least 1 risk overall
 // - Renders 4 categories (Financial, Data, Content, Legal) when visible
 // - Each category shows: name, severity, bar, and # of issues
-// - Clicking a category header toggles expand/collapse of its issues
+// - NEW: Category detail lists are collapsed by default until user clicks
 // - Each risk card can show evidence in an expandable details area
 // - Panel has a close button that hides it completely for this page load
 // - Panel supports FULL vs MINI mode, toggled by clicking the header
 // - Panel remembers FULL/MINI per-domain in chrome.storage.local
+// - NEW: Panel does NOT flash full then mini; it only appears after mode is applied
 //
 // It consumes the Risk Engine result object:
 //   {
@@ -196,9 +197,20 @@
     setPanelMode(panel, next);
   }
 
-  function applyInitialPanelMode(panel) {
+  /**
+   * Apply initial full/mini mode for this domain, then call onReady.
+   * This is async due to chrome.storage, so we only show the panel
+   * AFTER this has completed to avoid a flash of full → mini.
+   */
+  function applyInitialPanelMode(panel, onReady) {
+    if (!panel) {
+      if (onReady) onReady();
+      return;
+    }
+
     if (panelModeInitialized) {
       setPanelMode(panel, currentPanelMode);
+      if (onReady) onReady();
       return;
     }
 
@@ -208,8 +220,10 @@
       if (mode === "mini" || mode === "full") {
         setPanelMode(panel, mode);
       } else {
+        // default for domains with no stored state
         setPanelMode(panel, "full");
       }
+      if (onReady) onReady();
     });
   }
 
@@ -219,7 +233,7 @@
 
     panel = document.createElement("div");
     panel.id = PANEL_ID;
-    panel.style.display = "none";
+    panel.style.display = "none"; // we'll show it after mode is applied
 
     // Header
     const header = document.createElement("div");
@@ -299,8 +313,6 @@
 
     document.body.appendChild(panel);
 
-    applyInitialPanelMode(panel);
-
     return panel;
   }
 
@@ -375,7 +387,8 @@
     card.appendChild(barOuter);
     card.appendChild(issuesList);
 
-    let expanded = risks.length > 0;
+    // DEFAULT: collapsed, even if risks exist
+    let expanded = false;
     updateCategoryExpandedState(card, expanded);
 
     header.addEventListener("click", (evt) => {
@@ -507,9 +520,6 @@
 
     injectStylesheet();
     const panelEl = existingPanel || createPanelShell();
-    panelEl.style.display = "block";
-
-    applyInitialPanelMode(panelEl);
 
     const summaryEl = panelEl.querySelector("#scribbit-panel-summary");
     const scoreEl = panelEl.querySelector("#scribbit-panel-score");
@@ -551,6 +561,11 @@
         categoryList.appendChild(card);
       });
     }
+
+    // IMPORTANT: Only show the panel after mode is applied so we don't flash full → mini
+    applyInitialPanelMode(panelEl, () => {
+      panelEl.style.display = "block";
+    });
   }
 
   // ----- Dependency waiting & wiring ----------------------------------------
