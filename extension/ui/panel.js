@@ -8,8 +8,8 @@
 // - Clicking a category header toggles expand/collapse of its issues
 // - Each risk card can show evidence in an expandable details area
 // - Panel has a close button that hides it completely for this page load
-// - NEW: Panel supports FULL vs MINI mode, toggled by clicking the header
-// - NEW: Panel remembers FULL/MINI per-domain in chrome.storage.local
+// - Panel supports FULL vs MINI mode, toggled by clicking the header
+// - Panel remembers FULL/MINI per-domain in chrome.storage.local
 //
 // It consumes the Risk Engine result object:
 //   {
@@ -33,13 +33,11 @@
 
   const PANEL_STATE_STORAGE_KEY = "scribbit_panel_state_v1";
 
-  // Track if user manually closed the panel for this page
   let panelManuallyHidden = false;
-  // Track current mode: "full" or "mini"
   let currentPanelMode = "full";
   let panelModeInitialized = false;
 
-  // ----- Small helpers ------------------------------------------------------
+  // ----- Helpers -------------------------------------------------------------
 
   function normalizeRiskResult(maybe) {
     if (!maybe) return null;
@@ -69,7 +67,6 @@
 
   function summarizeCategorySeverity(risks) {
     if (!risks || risks.length === 0) return "none";
-    // Severity precedence: high > medium > low
     let hasHigh = false;
     let hasMedium = false;
     for (const r of risks) {
@@ -163,7 +160,7 @@
       if (typeof stored !== "object") stored = {};
       stored[hostname] = mode;
       chrome.storage.local.set({ [PANEL_STATE_STORAGE_KEY]: stored }, () => {
-        // best-effort; no need to handle callback
+        // no-op
       });
     });
   }
@@ -201,7 +198,6 @@
 
   function applyInitialPanelMode(panel) {
     if (panelModeInitialized) {
-      // We already applied state; just re-apply currentPanelMode to be safe.
       setPanelMode(panel, currentPanelMode);
       return;
     }
@@ -212,7 +208,6 @@
       if (mode === "mini" || mode === "full") {
         setPanelMode(panel, mode);
       } else {
-        // Default is full for domains where we haven't stored anything yet.
         setPanelMode(panel, "full");
       }
     });
@@ -224,7 +219,7 @@
 
     panel = document.createElement("div");
     panel.id = PANEL_ID;
-    panel.style.display = "none"; // we show it explicitly in updatePanel
+    panel.style.display = "none";
 
     // Header
     const header = document.createElement("div");
@@ -240,7 +235,7 @@
     const subtitle = document.createElement("div");
     subtitle.className = "scribbit-panel-subtitle";
     subtitle.id = "scribbit-panel-summary";
-    subtitle.textContent = ""; // filled dynamically
+    subtitle.textContent = "";
 
     headerLeft.appendChild(title);
     headerLeft.appendChild(subtitle);
@@ -255,7 +250,7 @@
     closeBtn.title = "Hide Scribbit for this page";
 
     closeBtn.addEventListener("click", (evt) => {
-      evt.stopPropagation(); // don’t toggle mini/full when clicking close
+      evt.stopPropagation();
       panelManuallyHidden = true;
       panel.style.display = "none";
     });
@@ -265,11 +260,9 @@
     header.appendChild(headerLeft);
     header.appendChild(headerRight);
 
-    // Clicking the header (but not the close button) toggles mini/full
+    // Clicking header (excluding close) toggles mini/full
     header.addEventListener("click", (evt) => {
-      if (evt.target.closest(".scribbit-panel-close")) {
-        return;
-      }
+      if (evt.target.closest(".scribbit-panel-close")) return;
       togglePanelMode(panel);
     });
 
@@ -290,7 +283,7 @@
     const riskScoreEl = document.createElement("div");
     riskScoreEl.className = "scribbit-panel-score";
     riskScoreEl.id = "scribbit-panel-score";
-    riskScoreEl.textContent = ""; // filled dynamically
+    riskScoreEl.textContent = "";
 
     const disclaimer = document.createElement("div");
     disclaimer.className = "scribbit-panel-disclaimer";
@@ -306,7 +299,6 @@
 
     document.body.appendChild(panel);
 
-    // Apply persisted mode once panel exists
     applyInitialPanelMode(panel);
 
     return panel;
@@ -349,14 +341,12 @@
     header.appendChild(nameEl);
     header.appendChild(headerRight);
 
-    // Bar
     const barOuter = document.createElement("div");
     barOuter.className = "scribbit-category-bar-outer";
 
     const barInner = document.createElement("div");
     barInner.className = "scribbit-category-bar-inner " + severityClass(level);
 
-    // Simple bar width heuristic
     let widthPercent = 0;
     if (risks.length > 0) {
       if (level === "high") widthPercent = 100;
@@ -367,7 +357,6 @@
 
     barOuter.appendChild(barInner);
 
-    // Issues list
     const issuesList = document.createElement("div");
     issuesList.className = "scribbit-category-issues";
 
@@ -386,12 +375,10 @@
     card.appendChild(barOuter);
     card.appendChild(issuesList);
 
-    // Collapse/expand behaviour
-    let expanded = risks.length > 0; // default expanded if there are issues
+    let expanded = risks.length > 0;
     updateCategoryExpandedState(card, expanded);
 
     header.addEventListener("click", (evt) => {
-      // Don’t re-toggle if click came from the toggle button itself; but behavior is same
       expanded = !expanded;
       updateCategoryExpandedState(card, expanded);
     });
@@ -450,7 +437,6 @@
     desc.className = "scribbit-risk-description";
     desc.textContent = risk.description || "";
 
-    // Evidence block
     const evidenceContainer = document.createElement("div");
     evidenceContainer.className = "scribbit-risk-evidence-container";
 
@@ -472,7 +458,8 @@
       });
     } else {
       const li = document.createElement("li");
-      li.textContent = "No specific lines were extracted, but language on this page matched this risk.";
+      li.textContent =
+        "No specific lines were extracted, but language on this page matched this risk.";
       evidenceList.appendChild(li);
     }
 
@@ -495,7 +482,6 @@
     item.appendChild(desc);
     item.appendChild(evidenceContainer);
 
-    // Keep "Why is this risky?" simple: scrolls to description/evidence
     whyBtn.addEventListener("click", () => {
       desc.scrollIntoView({ behavior: "smooth", block: "center" });
     });
@@ -509,26 +495,20 @@
     const riskResult = normalizeRiskResult(rawRiskResult);
     const existingPanel = document.getElementById(PANEL_ID);
 
-    // If the user manually closed the panel for this page, never show it again.
     if (panelManuallyHidden) {
       if (existingPanel) existingPanel.style.display = "none";
       return;
     }
 
-    // If no valid risks, hide existing panel (if any) and bail out.
     if (!riskResult || !Array.isArray(riskResult.risks) || riskResult.risks.length === 0) {
-      if (existingPanel) {
-        existingPanel.style.display = "none";
-      }
+      if (existingPanel) existingPanel.style.display = "none";
       return;
     }
 
-    // At this point we KNOW there are risks → create/show the panel.
     injectStylesheet();
     const panelEl = existingPanel || createPanelShell();
     panelEl.style.display = "block";
 
-    // Make sure mode is applied (especially if the panel just got created)
     applyInitialPanelMode(panelEl);
 
     const summaryEl = panelEl.querySelector("#scribbit-panel-summary");
@@ -559,7 +539,6 @@
     }
 
     if (categoryList) {
-      // Clear old content
       while (categoryList.firstChild) {
         categoryList.removeChild(categoryList.firstChild);
       }
@@ -574,32 +553,45 @@
     }
   }
 
-  // ----- Wiring to ScribbitMessaging ----------------------------------------
+  // ----- Dependency waiting & wiring ----------------------------------------
+
+  function waitForDependencies(callback, maxTries = 30, delayMs = 200) {
+    let tries = 0;
+    const interval = setInterval(() => {
+      if (window.ScribbitMessaging) {
+        clearInterval(interval);
+        callback();
+        return;
+      }
+      if (tries++ >= maxTries) {
+        clearInterval(interval);
+        console.warn(
+          "[Scribbit] panel.js: ScribbitMessaging not available after retries"
+        );
+      }
+    }, delayMs);
+  }
 
   function init() {
-    // Make sure we're only running in top frame
     if (window.top !== window.self) return;
 
-    if (!window.ScribbitMessaging) {
-      console.warn("[Scribbit] ScribbitMessaging not available in panel.js.");
-      return;
-    }
+    waitForDependencies(() => {
+      window.ScribbitMessaging.onRiskUpdated((payload) => {
+        updatePanel(payload);
+      });
 
-    window.ScribbitMessaging.onRiskUpdated((payload) => {
-      updatePanel(payload);
+      window.ScribbitMessaging.requestCurrentRisk().then(
+        (res) => {
+          const normalized = normalizeRiskResult(
+            res && (res.risk || res.riskResult || res.payload || res)
+          );
+          if (normalized) updatePanel(normalized);
+        },
+        (err) => {
+          console.warn("[Scribbit] requestCurrentRisk failed in panel.js:", err);
+        }
+      );
     });
-
-    window.ScribbitMessaging.requestCurrentRisk().then(
-      (res) => {
-        const normalized = normalizeRiskResult(
-          res && (res.risk || res.riskResult || res.payload || res)
-        );
-        if (normalized) updatePanel(normalized);
-      },
-      (err) => {
-        console.warn("[Scribbit] requestCurrentRisk failed in panel.js:", err);
-      }
-    );
   }
 
   if (document.readyState === "loading") {
