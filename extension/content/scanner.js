@@ -3,18 +3,24 @@
 //
 // Responsibilities:
 // - Build a normalized snapshot of the page text
-// - Add Airbnb-specific fee extraction & currency markers
+// - Add Airbnb-specific fee extraction
 // - Decide WHEN to scan (skip search engines, blocked domains,
 //   and search results pages on major travel sites)
 // - Detect SPA-style URL changes (Airbnb, OTAs) and re-scan
+// - If main page has too little meaningful content, silently fetch
+//   linked policy/ToS/refund pages, evaluate them, and MERGE risks
 // - Call ScribbitRiskEngine.evaluatePage(snapshot)
-// - Send results via ScribbitMessaging.sendScanComplete
+// - Send a single combined riskResult via ScribbitMessaging
 //
-// This file runs as a content script on matching pages.
+// NOTE: UI stays unchanged. The panel just receives a richer riskResult.
 
 (function () {
   const MAX_TEXT_LENGTH = 50000;
   const SPA_URL_CHECK_INTERVAL_MS = 500;
+
+  // Linked policy/ToS scanning
+  const POLICY_MAX_LINKS = 3;
+  const POLICY_FETCH_TIMEOUT_MS = 2500;
 
   const SEARCH_ENGINE_HOSTS = [
     "www.google.com",
@@ -51,7 +57,7 @@
     "www.notion.so"
   ];
 
-  // Expedia group / meta, etc.
+  // Travel-related host groups for search results whitelisting
   const EXPEDIA_FAMILY = [
     "expedia.com",
     "expedia.ca",
@@ -156,6 +162,33 @@
     "stayz.com.au"
   ];
 
+  // Keywords for detecting ToS/refund/policy links
+  const POLICY_KEYWORDS = [
+    "terms",
+    "conditions",
+    "terms of service",
+    "terms & conditions",
+    "terms and conditions",
+    "refund",
+    "refunds",
+    "refund policy",
+    "return policy",
+    "returns",
+    "cancellation",
+    "cancellations",
+    "cancellation policy",
+    "payment terms",
+    "billing terms",
+    "subscription",
+    "subscriptions",
+    "auto-renew",
+    "auto renew",
+    "automatic renewal",
+    "renewal terms",
+    "policy",
+    "policies"
+  ];
+
   function isSearchEngineHost(hostname) {
     return SEARCH_ENGINE_HOSTS.includes(hostname);
   }
@@ -182,7 +215,7 @@
       return substrings.some((s) => href.includes(s));
     }
 
-    // Booking.com (classic searchresults pages)
+    // Booking.com searchresults pages
     if (host.endsWith("booking.com")) {
       if (urlContainsAny(["/searchresults", "searchresults.html"])) return true;
     }
@@ -196,9 +229,9 @@
       }
     }
 
-    // Vrbo / HomeAway (vrbo.com, homeaway.com)
+    // Vrbo / HomeAway
     if (host.endsWith("vrbo.com") || host.endsWith("homeaway.com")) {
-      if (urlContainsAny(["/search/", "/search-results", "Search.mvc"])) {
+      if (urlContainsAny(["/search/", "/search-results", "search.mvc"])) {
         return true;
       }
     }
@@ -206,15 +239,16 @@
     // Expedia Group family
     if (EXPEDIA_FAMILY.some((d) => host === d || host.endsWith("." + d))) {
       if (urlContainsAny([
-        "/Hotel-Search",
+        "/hotel-search",
         "/hotel/search",
-        "/Flights-Search",
+        "/hotel/results",
+        "/flights-search",
         "/flight/search",
-        "/Car-Search",
+        "/car-search",
         "/car/search",
-        "/Vacation-Rentals-Search",
-        "/VacationPackages-Search",
-        "/Packages-Search"
+        "/vacation-rentals-search",
+        "/vacationpackages-search",
+        "/packages-search"
       ])) {
         return true;
       }
@@ -325,7 +359,7 @@
     const symbolMatches = rawText.match(/[$€£¥]/g);
     if (symbolMatches) symbolMatches.forEach((s) => markers.add(s));
 
-    const codeMatches = rawText.match(/\b(USD|CAD|EUR|EUR|GBP|AUD|NZD)\b/gi);
+    const codeMatches = rawText.match(/\b(USD|CAD|EUR|GBP|AUD|NZD)\b/gi);
     if (codeMatches) codeMatches.forEach((c) => markers.add(c.toUpperCase()));
 
     try {
@@ -410,32 +444,262 @@
     };
   }
 
+  // ------------------------------
+  // Linked policy / ToS detection
+  // ------------------------------
+
+  function findPolicyLinks() {
+    const anchors = Array.from(document.querySelectorAll("a[href]"));
+    const matches = [];
+
+    anchors.forEach((a) => {
+      let href = (a.getAttribute("href") || "").trim();
+      if (!href) return;
+      if (href.startsWith("#")) return;
+      const lowerHref = href.toLowerCase();
+
+      // Skip mailto: and javascript:
+      if (lowerHref.startsWith("mailto:") || lowerHref.startsWith("javascript:")) {
+        return;
+      }
+
+      let absoluteUrl;
+      try {
+        absoluteUrl = new URL(href, window.location.href).href;
+      } catch {
+        return;
+      }
+
+      const text = (a.innerText || a.textContent || "").toLowerCase();
+      const haystack = text + " " + lowerHref;
+
+      const matched = POLICY_KEYWORDS.some((kw) =>
+        haystack.includes(kw.toLowerCase())
+      );
+      if (matched) {
+        matches.push(absoluteUrl);
+      }
+    });
+
+    // Deduplicate + cap
+    const seen = new Set();
+    const deduped = [];
+    for (const url of matches) {
+      if (!seen.has(url)) {
+        seen.add(url);
+        deduped.push(url);
+      }
+    }
+
+    return deduped.slice(0, POLICY_MAX_LINKS);
+  }
+
+  async function fetchWithTimeout(url, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const resp = await fetch(url, {
+        signal: controller.signal,
+        credentials: "include"
+      });
+
+      if (!resp || !resp.ok) {
+        console.warn("[Scribbit] policy fetch non-OK:", url, resp && resp.status);
+        return null;
+      }
+
+      const text = await resp.text();
+      return text;
+    } catch (err) {
+      console.warn("[Scribbit] policy fetch failed:", url, err);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function extractTextFromHtml(html) {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
+      if (!doc || !doc.body) return "";
+      return doc.body.innerText || "";
+    } catch (err) {
+      console.warn("[Scribbit] extractTextFromHtml failed:", err);
+      return "";
+    }
+  }
+
+  async function evaluatePolicyLinks(urls) {
+    if (!window.ScribbitRiskEngine || typeof window.ScribbitRiskEngine.evaluatePage !== "function") {
+      return [];
+    }
+
+    const tasks = urls.map(async (url) => {
+      try {
+        const html = await fetchWithTimeout(url, POLICY_FETCH_TIMEOUT_MS);
+        if (!html) return null;
+
+        const text = extractTextFromHtml(html);
+        if (!text || text.trim().length < 300) {
+          // Too short to be meaningful
+          return null;
+        }
+
+        const snapshot = {
+          url,
+          hostname: (new URL(url)).hostname,
+          text: text,
+          textRaw: text,
+          textNormalized: text.toLowerCase(),
+          currencySymbolsDetected: detectCurrencyMarkers(text),
+          airbnbFees: []
+        };
+
+        const result = window.ScribbitRiskEngine.evaluatePage(snapshot);
+        return result || null;
+      } catch (err) {
+        console.warn("[Scribbit] evaluatePolicyLinks error for", url, err);
+        return null;
+      }
+    });
+
+    const results = await Promise.all(tasks);
+    return results.filter(Boolean);
+  }
+
+  function mergeRiskResults(primaryResult, policyResults) {
+    if (!primaryResult || !Array.isArray(policyResults) || policyResults.length === 0) {
+      return primaryResult;
+    }
+
+    // Merge risks (simple concat)
+    const mergedRisks = []
+      .concat(Array.isArray(primaryResult.risks) ? primaryResult.risks : [])
+      .concat(
+        ...policyResults.map((r) => (Array.isArray(r.risks) ? r.risks : []))
+      );
+
+    // Merge category scores: take max per category across all results
+    const mergedCategoryScores = {};
+
+    function includeCategoryScores(cs) {
+      if (!cs) return;
+      Object.keys(cs).forEach((key) => {
+        const val = typeof cs[key] === "number" ? cs[key] : 0;
+        if (!Object.prototype.hasOwnProperty.call(mergedCategoryScores, key)) {
+          mergedCategoryScores[key] = val;
+        } else if (val > mergedCategoryScores[key]) {
+          mergedCategoryScores[key] = val;
+        }
+      });
+    }
+
+    includeCategoryScores(primaryResult.categoryScores);
+    policyResults.forEach((r) => includeCategoryScores(r.categoryScores));
+
+    // Merge riskScore: take the maximum overall riskScore
+    let mergedRiskScore =
+      typeof primaryResult.riskScore === "number" ? primaryResult.riskScore : 0;
+
+    policyResults.forEach((r) => {
+      if (typeof r.riskScore === "number" && r.riskScore > mergedRiskScore) {
+        mergedRiskScore = r.riskScore;
+      }
+    });
+
+    // Merge overallLevel: pick the highest severity
+    const LEVEL_ORDER = { low: 1, medium: 2, high: 3 };
+
+    function normalizeLevel(level) {
+      const l = String(level || "").toLowerCase();
+      if (l === "high" || l === "medium" || l === "low") return l;
+      return "low";
+    }
+
+    function pickHigherLevel(a, b) {
+      const na = normalizeLevel(a);
+      const nb = normalizeLevel(b);
+      return (LEVEL_ORDER[nb] || 0) > (LEVEL_ORDER[na] || 0) ? b : a;
+    }
+
+    let mergedOverallLevel = primaryResult.overallLevel || "LOW";
+
+    policyResults.forEach((r) => {
+      mergedOverallLevel = pickHigherLevel(
+        mergedOverallLevel,
+        r.overallLevel || "LOW"
+      );
+    });
+
+    // Merge hasMeaningfulContent
+    const hasMeaningful =
+      Boolean(primaryResult.hasMeaningfulContent) ||
+      policyResults.some((r) => r.hasMeaningfulContent);
+
+    const finalResult = {
+      ...primaryResult,
+      risks: mergedRisks,
+      categoryScores: mergedCategoryScores,
+      riskScore: mergedRiskScore,
+      overallScore: mergedRiskScore, // keep legacy alias in sync
+      overallLevel: mergedOverallLevel,
+      hasMeaningfulContent: hasMeaningful
+    };
+
+    return finalResult;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Core scan + enrichment
+  // ---------------------------------------------------------------------------
+
   async function runScan() {
     try {
       const snapshot = buildSnapshot();
-      const riskResult = window.ScribbitRiskEngine
+
+      const primaryResult = window.ScribbitRiskEngine
         ? window.ScribbitRiskEngine.evaluatePage(snapshot)
         : null;
 
-      if (!window.ScribbitMessaging || !riskResult) {
+      if (!window.ScribbitMessaging || !primaryResult) {
         if (!window.ScribbitMessaging) {
           console.warn("[Scribbit] scanner.js: ScribbitMessaging missing at runScan");
         }
-        if (!riskResult) {
+        if (!primaryResult) {
           console.warn("[Scribbit] scanner.js: RiskEngine returned no result");
         }
         return;
       }
 
+      let finalResult = primaryResult;
+
+      // If the main page doesn't have enough meaningful content,
+      // silently look for linked policy/ToS pages and merge their risks.
+      if (!primaryResult.hasMeaningfulContent) {
+        const policyLinks = findPolicyLinks();
+        if (policyLinks.length > 0) {
+          console.debug(
+            "[Scribbit] scanner.js: main page low-content, evaluating policy links:",
+            policyLinks
+          );
+          const policyResults = await evaluatePolicyLinks(policyLinks);
+          if (policyResults && policyResults.length > 0) {
+            finalResult = mergeRiskResults(primaryResult, policyResults);
+          }
+        }
+      }
+
       await window.ScribbitMessaging.sendScanComplete({
         url: snapshot.url,
-        riskResult
+        riskResult: finalResult
       });
 
       console.log("[Scribbit] scanner.js: scan sent", {
         url: snapshot.url,
-        riskScore: riskResult && riskResult.riskScore,
-        overallLevel: riskResult && riskResult.overallLevel
+        riskScore: finalResult && finalResult.riskScore,
+        overallLevel: finalResult && finalResult.overallLevel
       });
     } catch (err) {
       console.error("[Scribbit] scanner.js: error during runScan:", err);
@@ -472,7 +736,7 @@
 
     try {
       dynamicObserver = new MutationObserver(() => {
-        // Throttle re-scans to avoid hammering the backend
+        // Throttle re-scans to avoid hammering the backend/engine
         if (mutationScanTimeout) return;
         mutationScanTimeout = setTimeout(() => {
           mutationScanTimeout = null;
@@ -555,8 +819,8 @@
 
     if (isSearchResultsPage(hostname, url)) {
       console.debug("[Scribbit] scanner: skipping search results page:", url);
-      // Still start the SPA watcher so that when user clicks into a listing
-      // (e.g., Airbnb /rooms/...), we can start scanning there.
+      // Still start SPA watcher: when user clicks into a listing (e.g. Airbnb /rooms/...),
+      // we want to begin scanning there.
       setupSpaUrlWatcher();
       return;
     }
