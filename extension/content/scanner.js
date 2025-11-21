@@ -200,6 +200,15 @@
     });
   }
 
+  function getPathname(url) {
+    try {
+      const u = new URL(url);
+      return (u.pathname || "").toLowerCase();
+    } catch {
+      return "";
+    }
+  }
+
   /**
    * Detect search results pages on major travel sites that we NEVER want to scan.
    *
@@ -210,23 +219,37 @@
   function isSearchResultsPage(hostname, url) {
     const host = (hostname || "").toLowerCase();
     const href = (url || "").toLowerCase();
+    const path = getPathname(url);
 
     function urlContainsAny(substrings) {
       return substrings.some((s) => href.includes(s));
     }
 
-    // Booking.com searchresults pages
-    if (host.endsWith("booking.com")) {
-      if (urlContainsAny(["/searchresults", "searchresults.html"])) return true;
-    }
-
-    // Airbnb
-    // - Search/explore: /s/, /homes, /stays, /wishlists
-    // - Listing details: /rooms/ (we DO want Scribbit there)
+    // ---------------- Airbnb special handling ----------------
+    // We explicitly DO NOT treat Airbnb checkout / booking routes as search results,
+    // even if they also contain "stays" or other search-like fragments.
     if (host.endsWith("airbnb.com") || host.endsWith("airbnb.ca")) {
+      const isCheckoutLike =
+        path.includes("/checkout") ||
+        path.includes("/book") ||
+        path.includes("/reservation") ||
+        path.includes("/payments");
+
+      if (isCheckoutLike) {
+        // Always allow Scribbit on Airbnb checkout / booking flows.
+        return false;
+      }
+
+      // Search/explore: /s/, /homes, /stays, /wishlists
+      // Listing details: /rooms/ (we DO want Scribbit there)
       if (urlContainsAny(["/s/", "/homes", "/stays", "/wishlists"])) {
         if (!href.includes("/rooms/")) return true;
       }
+    }
+
+    // Booking.com searchresults pages
+    if (host.endsWith("booking.com")) {
+      if (urlContainsAny(["/searchresults", "searchresults.html"])) return true;
     }
 
     // Vrbo / HomeAway
