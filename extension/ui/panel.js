@@ -1,41 +1,49 @@
 // ui/panel.js
-// Scribbit Fairness Scanner - On-page Panel 2.0 (Category → Risk Rows → Hover Details)
+// Scribbit Fairness Scanner - On-page Panel 2.0
 //
-// Architecture:
-// - Renders 5 fixed categories from canonical Risk Model v2:
+// Behaviour:
+// - Renders 5 fixed categories (Risk Model v2):
 //     financialExposure, refundAndCancellation, subscriptionAndBilling,
 //     dataPrivacy, legalRights
-// - Each category shows: name, severity badge, bar, and # of risks
-// - Category body shows risk rows; each row has:
+// - Each category shows name, severity badge, bar, and # of risks
+// - All categories start COLLAPSED (body hidden) so you see
+//   all category headers + High/Medium/Low/No issues at a glance.
+// - Clicking a CATEGORY HEADER toggles that category's risk rows.
+// - Inside an expanded category, each risk row has:
 //     icon, title, one-line summary, "Why is this risky?" link
-// - "Why is this risky?" shows a floating popup on hover,
-//   using risk details as content, and hides on mouse-out.
-// - Categories with zero risks show a green ✓ "No risks detected" row
-// - Panel supports FULL vs MINI mode, toggled by header
-// - Panel remembers FULL/MINI per-domain in chrome.storage.local
-// - Panel listens to ScribbitMessaging for canonical riskResult:
+// - "Why is this risky?" shows a small hover popup with:
+//     "Why this matters", evidence snippet list, fee/FX details if detected.
+// - Panel has MINI vs FULL mode toggled by header click (panel-level).
+// - Panel remembers MINI/FULL per domain via chrome.storage.local.
+// - Panel only shows if there is meaningful riskResult content.
 //
-//   {
-//     riskScore: number,
-//     overallLevel: "LOW" | "MEDIUM" | "HIGH",
-//     overallScore: number,
-//     hasMeaningfulContent: boolean,
-//     categoryScores: {
-//       financialExposure,
-//       refundAndCancellation,
-//       subscriptionAndBilling,
-//       dataPrivacy,
-//       legalRights
-//     },
-//     risks: [
-//       { category: string, title: string, evidence: string[], severity: "LOW" | "MEDIUM" | "HIGH" }
-//     ]
-//   }
+// riskResult canonical shape:
+//
+// {
+//   riskScore: number,
+//   overallLevel: "LOW" | "MEDIUM" | "HIGH",
+//   overallScore: number,
+//   hasMeaningfulContent: boolean,
+//   categoryScores: {
+//     financialExposure,
+//     refundAndCancellation,
+//     subscriptionAndBilling,
+//     dataPrivacy,
+//     legalRights
+//   },
+//   risks: [
+//     {
+//       category: string,
+//       title: string,
+//       evidence: string[],
+//       severity: "LOW" | "MEDIUM" | "HIGH"
+//     }
+//   ]
+// }
 
 (function () {
   const PANEL_ID = "scribbit-fairness-panel";
 
-  // Canonical category keys and labels (Panel 2.0)
   const CATEGORY_ORDER = [
     "financialExposure",
     "refundAndCancellation",
@@ -55,20 +63,22 @@
   const PANEL_STATE_STORAGE_KEY = "scribbit_panel_state_v1";
 
   let panelManuallyHidden = false;
-  let currentPanelMode = "mini"; // default visually
+  let currentPanelMode = "mini"; // mini vs full
   let panelModeInitialized = false;
 
-  // Single shared tooltip for all risks
+  // Category-level expansion state: by default, all collapsed.
+  const expandedCategories = new Set();
+
+  // Shared hover tooltip for all "Why is this risky?" links
   let tooltipEl = null;
   let tooltipHideTimeout = null;
   let tooltipPanelBodyEl = null;
 
-  // ----- Helpers: normalization & mapping -----------------------------------
+  // ----- Helpers: normalization & mapping ------------------------------
 
   function normalizeRiskResult(maybe) {
     if (!maybe) return null;
 
-    // Already looks canonical
     if (
       Array.isArray(maybe.risks) ||
       typeof maybe.riskScore === "number" ||
@@ -87,22 +97,14 @@
   function mapCategoryKey(rawCategory) {
     if (!rawCategory) return "financialExposure";
     const c = String(rawCategory).trim();
-
-    // Prefer canonical keys if already present
     if (CATEGORY_ORDER.includes(c)) return c;
 
     const lower = c.toLowerCase();
-
-    // Backwards compatibility for older riskEngine category values
     if (lower === "financial") return "financialExposure";
     if (lower === "refund" || lower === "refunds" || lower === "refund_cancellation") {
       return "refundAndCancellation";
     }
-    if (
-      lower === "subscription" ||
-      lower === "billing" ||
-      lower === "subscription_billing"
-    ) {
+    if (lower === "subscription" || lower === "billing" || lower === "subscription_billing") {
       return "subscriptionAndBilling";
     }
     if (lower === "data_privacy" || lower === "privacy") return "dataPrivacy";
@@ -110,7 +112,6 @@
       return "legalRights";
     }
 
-    // Fallback: bucket unknown categories into Legal
     return "legalRights";
   }
 
@@ -121,11 +122,10 @@
     });
 
     const risks = Array.isArray(riskResult.risks) ? riskResult.risks : [];
-
     risks.forEach((risk) => {
-      const mappedKey = mapCategoryKey(risk.category);
-      if (!grouped[mappedKey]) grouped[mappedKey] = [];
-      grouped[mappedKey].push(risk);
+      const key = mapCategoryKey(risk.category);
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(risk);
     });
 
     return grouped;
@@ -140,7 +140,6 @@
   }
 
   function summarizeCategorySeverity(risks, categoryScore) {
-    // Prefer actual risks if present
     if (risks && risks.length > 0) {
       let hasHigh = false;
       let hasMedium = false;
@@ -153,8 +152,6 @@
       if (hasMedium) return "medium";
       return "low";
     }
-
-    // If no explicit risks, infer from category score
     return severityFromScore(categoryScore);
   }
 
@@ -243,7 +240,6 @@
       const hasFeeWord = feeRegex.test(line);
       const hasPercent = percentRegex.test(line);
       const hasMoney = moneyRegex.test(line);
-
       if (hasFeeWord || hasPercent || hasMoney) {
         feeSnippets.push(line.trim());
       }
@@ -252,7 +248,7 @@
     return feeSnippets;
   }
 
-  // ----- Storage for per-domain panel mode ----------------------------------
+  // ----- Storage: per-domain panel mode --------------------------------
 
   function loadDomainPanelState(callback) {
     const hostname = getHostname();
@@ -292,13 +288,11 @@
       let stored = (result && result[PANEL_STATE_STORAGE_KEY]) || {};
       if (typeof stored !== "object") stored = {};
       stored[hostname] = mode;
-      chrome.storage.local.set({ [PANEL_STATE_STORAGE_KEY]: stored }, () => {
-        // no-op
-      });
+      chrome.storage.local.set({ [PANEL_STATE_STORAGE_KEY]: stored }, () => {});
     });
   }
 
-  // ----- Tooltip helpers -----------------------------------------------------
+  // ----- Tooltip helpers ------------------------------------------------
 
   function ensureTooltip(panelBody) {
     if (tooltipEl && tooltipPanelBodyEl === panelBody) return tooltipEl;
@@ -320,11 +314,9 @@
       tooltipPanelBodyEl.appendChild(tooltipEl);
     }
 
-    // Hovering tooltip cancels hide; leaving schedules hide
     tooltipEl.addEventListener("mouseenter", cancelTooltipHide);
     tooltipEl.addEventListener("mouseleave", scheduleTooltipHide);
 
-    // Ensure body can act as positioning context
     if (!tooltipPanelBodyEl.style.position) {
       tooltipPanelBodyEl.style.position = "relative";
     }
@@ -344,20 +336,17 @@
     const tooltip = ensureTooltip(panelBody);
     cancelTooltipHide();
 
-    // Copy details content into tooltip
     tooltip.innerHTML = detailsEl.innerHTML;
 
-    // Position relative to panel body
     const triggerRect = triggerEl.getBoundingClientRect();
     const bodyRect = panelBody.getBoundingClientRect();
 
     const top =
-      triggerRect.bottom - bodyRect.top + panelBody.scrollTop + 4; // slightly below link
+      triggerRect.bottom - bodyRect.top + panelBody.scrollTop + 4;
     let left = triggerRect.left - bodyRect.left + panelBody.scrollLeft;
 
-    // Basic bounds adjustment so tooltip doesn't bleed off the right edge
     tooltip.style.display = "block";
-    tooltip.style.visibility = "hidden"; // measure first
+    tooltip.style.visibility = "hidden";
     tooltip.style.top = "0px";
     tooltip.style.left = "0px";
 
@@ -387,7 +376,7 @@
     clearTimeout(tooltipHideTimeout);
   }
 
-  // ----- DOM creation / wiring ----------------------------------------------
+  // ----- DOM helpers ----------------------------------------------------
 
   function injectStylesheet() {
     if (document.querySelector('link[data-scribbit-panel-css="1"]')) return;
@@ -427,15 +416,12 @@
     }
 
     panelModeInitialized = true;
-
-    // Start as mini visually to avoid full → mini flash
     setPanelMode(panel, "mini");
 
     loadDomainPanelState((mode) => {
       if (mode === "mini" || mode === "full") {
         setPanelMode(panel, mode);
       }
-      // If null, we keep default "mini" for new domains
     });
   }
 
@@ -445,10 +431,9 @@
 
     panel = document.createElement("div");
     panel.id = PANEL_ID;
-    panel.style.display = "none"; // will show in updatePanel
-    panel.classList.add("scribbit-panel-mini"); // default mini until we know better
+    panel.style.display = "none";
+    panel.classList.add("scribbit-panel-mini");
 
-    // Header
     const header = document.createElement("div");
     header.className = "scribbit-panel-header";
 
@@ -472,7 +457,7 @@
 
     const closeBtn = document.createElement("button");
     closeBtn.className = "scribbit-panel-close";
-    closeBtn.setAttribute("type", "button");
+    closeBtn.type = "button";
     closeBtn.innerHTML = "×";
     closeBtn.title = "Hide Scribbit for this page";
 
@@ -483,17 +468,14 @@
     });
 
     headerRight.appendChild(closeBtn);
-
     header.appendChild(headerLeft);
     header.appendChild(headerRight);
 
-    // Clicking header (excluding close) toggles mini/full
     header.addEventListener("click", (evt) => {
       if (evt.target.closest(".scribbit-panel-close")) return;
       togglePanelMode(panel);
     });
 
-    // Body
     const body = document.createElement("div");
     body.className = "scribbit-panel-body";
 
@@ -503,7 +485,6 @@
 
     body.appendChild(categoryList);
 
-    // Footer
     const footer = document.createElement("div");
     footer.className = "scribbit-panel-footer";
 
@@ -656,16 +637,14 @@
     row.appendChild(icon);
     row.appendChild(content);
 
-    // Hidden details source for tooltip
     const details = document.createElement("div");
     details.className = "scribbit-risk-details";
-    const detailsContent = createRiskDetailsContent(risk);
-    details.appendChild(detailsContent);
+    const detailsInner = createRiskDetailsContent(risk);
+    details.appendChild(detailsInner);
 
     group.appendChild(row);
     group.appendChild(details);
 
-    // Hover behaviour: show tooltip on link hover
     toggleBtn.addEventListener("mouseenter", () => {
       showRiskTooltip(details, toggleBtn);
     });
@@ -749,7 +728,7 @@
       else if (level === "medium") widthPercent = 66;
       else widthPercent = 33;
     }
-    barInner.style.width = widthPercent + "%";
+    barInner.style.width = `${widthPercent}%`;
 
     barOuter.appendChild(barInner);
 
@@ -770,6 +749,23 @@
 
     body.appendChild(riskRows);
 
+    // Start collapsed unless user already expanded this category before
+    if (!expandedCategories.has(categoryKey)) {
+      card.classList.add("scribbit-category-collapsed");
+    }
+
+    header.addEventListener("click", (evt) => {
+      evt.stopPropagation();
+      const isCollapsed = card.classList.contains("scribbit-category-collapsed");
+      if (isCollapsed) {
+        card.classList.remove("scribbit-category-collapsed");
+        expandedCategories.add(categoryKey);
+      } else {
+        card.classList.add("scribbit-category-collapsed");
+        expandedCategories.delete(categoryKey);
+      }
+    });
+
     card.appendChild(header);
     card.appendChild(barOuter);
     card.appendChild(body);
@@ -777,7 +773,7 @@
     return card;
   }
 
-  // ----- Main update/render --------------------------------------------------
+  // ----- Main update/render -------------------------------------------
 
   function updatePanel(rawRiskResult) {
     const riskResult = normalizeRiskResult(rawRiskResult);
@@ -788,13 +784,13 @@
       return;
     }
 
-    const risksArray = riskResult && Array.isArray(riskResult.risks) ? riskResult.risks : [];
+    const risksArray =
+      riskResult && Array.isArray(riskResult.risks) ? riskResult.risks : [];
     const hasMeaningfulContent =
       riskResult && typeof riskResult.hasMeaningfulContent === "boolean"
         ? riskResult.hasMeaningfulContent
         : risksArray.length > 0;
 
-    // If nothing meaningful to show, hide the panel
     if (!riskResult || (!hasMeaningfulContent && risksArray.length === 0)) {
       if (existingPanel) existingPanel.style.display = "none";
       return;
@@ -858,7 +854,7 @@
     panelEl.style.display = "block";
   }
 
-  // ----- Dependency waiting & wiring ----------------------------------------
+  // ----- Init & wiring -------------------------------------------------
 
   function waitForDependencies(callback, maxTries = 30, delayMs = 200) {
     let tries = 0;
@@ -878,16 +874,13 @@
   }
 
   function init() {
-    // Skip iframes; only run in top frame
     if (window.top !== window.self) return;
 
     waitForDependencies(() => {
-      // Streamed updates (SPAs, dynamic content, etc.)
       window.ScribbitMessaging.onRiskUpdated((payload) => {
         updatePanel(payload);
       });
 
-      // Initial state on first load
       window.ScribbitMessaging.requestCurrentRisk().then(
         (res) => {
           const normalized = normalizeRiskResult(

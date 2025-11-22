@@ -1,5 +1,5 @@
 /* ui/panel.css */
-/* Scribbit Fairness Scanner - Panel 2.0 Styles (Category → Risk Rows → Hover Details) */
+/* Scribbit Fairness Scanner - Panel 2.0 (Category-collapsed + hover details) */
 
 #scribbit-fairness-panel {
   position: fixed;
@@ -28,7 +28,7 @@
   max-height: none;
 }
 
-/* Mini mode: hide body & footer, keep header compact */
+/* Mini mode: only header */
 
 #scribbit-fairness-panel.scribbit-panel-mini .scribbit-panel-body,
 #scribbit-fairness-panel.scribbit-panel-mini .scribbit-panel-footer {
@@ -55,7 +55,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 8px 10px;
-  background: #020617; /* near-black */
+  background: #020617;
   color: #e5e7eb;
   cursor: pointer;
 }
@@ -122,6 +122,12 @@
   border: 1px solid #e5e7eb;
 }
 
+/* Collapsed state: hide body */
+
+.scribbit-category-card.scribbit-category-collapsed .scribbit-category-body {
+  display: none;
+}
+
 /* Category header */
 
 .scribbit-category-header {
@@ -130,6 +136,7 @@
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 6px;
+  cursor: pointer;
 }
 
 .scribbit-category-header-left {
@@ -214,7 +221,7 @@
   padding: 6px;
 }
 
-/* Risk row layout: icon + wide text + small link */
+/* Risk row layout: icon + wide text + small link under */
 
 .scribbit-risk-row {
   display: flex;
@@ -249,7 +256,7 @@
   color: #16a34a;
 }
 
-/* Risk content: main text + small action link underneath */
+/* Risk content */
 
 .scribbit-risk-content {
   display: flex;
@@ -276,7 +283,7 @@
   color: #4b5563;
 }
 
-/* Risk toggle button */
+/* Risk toggle link */
 
 .scribbit-risk-toggle {
   border: none;
@@ -300,13 +307,13 @@
   padding: 0;
 }
 
-/* Details container (used as content source for tooltip; kept hidden) */
+/* Hidden details container (used as tooltip source) */
 
 .scribbit-risk-details {
   display: none;
 }
 
-/* Tooltip card shown on hover */
+/* Tooltip card */
 
 .scribbit-risk-tooltip {
   position: absolute;
@@ -391,7 +398,7 @@
   color: #6b7280;
 }
 
-/* Severity colors (shared tokens) */
+/* Severity tokens */
 
 .scribbit-severity-high {
   background: rgba(239, 68, 68, 0.1);
@@ -417,7 +424,7 @@
   color: #475569;
 }
 
-/* Apply severity colors to category bar & icons */
+/* Severity applied */
 
 .scribbit-category-bar-inner.scribbit-severity-high,
 .scribbit-risk-icon.scribbit-severity-high {
@@ -439,7 +446,7 @@
   background: rgba(148, 163, 184, 0.75);
 }
 
-/* Scrollbar subtle styling inside panel body/evidence */
+/* Scrollbars */
 
 .scribbit-panel-body::-webkit-scrollbar,
 .scribbit-risk-evidence-list::-webkit-scrollbar {
