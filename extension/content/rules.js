@@ -155,6 +155,35 @@ const ScribbitRules = (() => {
     return snippets;
   }
 
+  /**
+   * Format a currency exposure line when we know bookingTotalAmount.
+   */
+  function buildExposureLine(totalAmount, lostPercent, symbol) {
+    if (
+      typeof totalAmount !== "number" ||
+      !isFinite(totalAmount) ||
+      totalAmount <= 0 ||
+      typeof lostPercent !== "number" ||
+      !isFinite(lostPercent) ||
+      lostPercent <= 0
+    ) {
+      return null;
+    }
+
+    const currencySymbol = symbol || "$";
+    const lostAmountRaw = (totalAmount * lostPercent) / 100;
+    const lostAmount = Math.round(lostAmountRaw * 100) / 100;
+
+    const formattedTotal = totalAmount.toLocaleString(undefined, {
+      maximumFractionDigits: 2
+    });
+    const formattedExposure = lostAmount.toLocaleString(undefined, {
+      maximumFractionDigits: 2
+    });
+
+    return `If your total booking is around ${currencySymbol}${formattedTotal}, losing ${lostPercent}% means roughly ${currencySymbol}${formattedExposure} at risk if you cancel after this point.`;
+  }
+
   /************************************************************
    * Rule 1: Refund / cancellation language
    *  - non_refundable_or_final_sale
@@ -341,6 +370,97 @@ const ScribbitRules = (() => {
   };
 
   /************************************************************
+   * Rule 1d: Percentage-based partial refunds (e.g., "50% refund")
+   *
+   * Goal:
+   *  - Detect sentences like "you'll receive a 50% refund"
+   *  - Combine with bookingTotalAmount (if present) to show $ exposure.
+   *  - Uses existing short_refund_or_return_window card (no model change).
+   ************************************************************/
+  const REFUND_PERCENTAGE_EXPOSURE_RULE = {
+    id: "refund_percentage_exposure",
+
+    evaluate(snapshot) {
+      const text = snapshot.textNormalized || "";
+      if (!text) return null;
+
+      const raw = snapshot.textRaw || "";
+      const lower = text.toLowerCase();
+
+      // Require cancellation/refund context globally.
+      const contextKeywords = ["cancel", "cancellation", "refund", "refundable"];
+      const hasContext = contextKeywords.some((kw) => lower.includes(kw));
+      if (!hasContext) return null;
+
+      const percentRegex = /(\d{1,2})\s*%/g;
+      const candidates = [];
+
+      let match;
+      while ((match = percentRegex.exec(lower)) !== null) {
+        const percentNum = parseInt(match[1], 10);
+        if (!isFinite(percentNum) || percentNum <= 0 || percentNum >= 100) {
+          continue;
+        }
+
+        const idx = match.index;
+        const windowStart = Math.max(0, idx - 80);
+        const windowEnd = Math.min(lower.length, idx + 80);
+        const windowText = lower.slice(windowStart, windowEnd);
+
+        // Only keep percentages that clearly relate to refunds/cancellation.
+        if (!/(refund|refunded|refunds|cancel|cancellation|fee|charge)/.test(windowText)) {
+          continue;
+        }
+
+        candidates.push({
+          percent: percentNum,
+          keyword: match[1] + "%"
+        });
+      }
+
+      if (!candidates.length) return null;
+
+      // Prefer the case with the largest loss (smallest refund %).
+      let chosen = candidates[0];
+      for (const c of candidates) {
+        const currentLoss = 100 - c.percent;
+        const bestLoss = 100 - chosen.percent;
+        if (currentLoss > bestLoss) {
+          chosen = c;
+        }
+      }
+
+      const evidence = [];
+      const snippetEvidence = findKeywordEvidence(
+        text,
+        raw,
+        [chosen.keyword],
+        2
+      );
+      if (snippetEvidence.length) {
+        evidence.push(...snippetEvidence);
+      }
+
+      const total = snapshot.bookingTotalAmount;
+      const symbol = snapshot.bookingCurrencySymbol || "$";
+
+      if (typeof total === "number" && isFinite(total) && total > 0) {
+        const lostPercent = 100 - chosen.percent;
+        const exposureLine = buildExposureLine(total, lostPercent, symbol);
+        if (exposureLine) {
+          evidence.push(exposureLine);
+        }
+      }
+
+      if (!evidence.length) return null;
+
+      return createRiskFromCard("short_refund_or_return_window", evidence, {
+        tags: ["refunds", "cancellation", "partial_refund", "percentage"]
+      });
+    }
+  };
+
+  /************************************************************
    * Rule 2: DCC / FX confusion
    *  - dcc_or_fx_markup
    ************************************************************/
@@ -369,8 +489,7 @@ const ScribbitRules = (() => {
         "currency conversion fee",
         "currency conversion",
         "conversion fee",
-        "conversion rate",
-        "exchange rate applies",
+        "conversion rate applies",
         "exchange rate will be",
         "we convert",
         "we may convert",
@@ -715,6 +834,7 @@ const ScribbitRules = (() => {
     REFUND_KEYWORDS_RULE,
     REFUND_SHORT_WINDOW_RULE,
     REFUND_DELAY_RULE,
+    REFUND_PERCENTAGE_EXPOSURE_RULE,
     DCC_MIXED_CURRENCY_RULE,
     ARBITRATION_CLAUSE_RULE,
     AUTO_RENEWAL_RULE,

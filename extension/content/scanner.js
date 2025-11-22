@@ -4,6 +4,7 @@
 // Responsibilities:
 // - Build a normalized snapshot of the page text
 // - Add Airbnb-specific fee extraction
+// - Approximate booking total + currency for checkout pages
 // - Decide WHEN to scan (skip search engines, blocked domains,
 //   and search results pages on major travel sites)
 // - Detect SPA-style URL changes (Airbnb, OTAs) and re-scan
@@ -262,101 +263,115 @@
 
     // Expedia Group family
     if (EXPEDIA_FAMILY.some((d) => host === d || host.endsWith("." + d))) {
-      if (urlContainsAny([
-        "/hotel-search",
-        "/hotel/search",
-        "/hotel/results",
-        "/flights-search",
-        "/flight/search",
-        "/car-search",
-        "/car/search",
-        "/vacation-rentals-search",
-        "/vacationpackages-search",
-        "/packages-search"
-      ])) {
+      if (
+        urlContainsAny([
+          "/hotel-search",
+          "/hotel/search",
+          "/hotel/results",
+          "/flights-search",
+          "/flight/search",
+          "/car-search",
+          "/car/search",
+          "/vacation-rentals-search",
+          "/vacationpackages-search",
+          "/packages-search"
+        ])
+      ) {
         return true;
       }
     }
 
     // Kayak, Skyscanner, Momondo, Trivago, TripAdvisor, Agoda
     if (META_SEARCH_FAMILY.some((d) => host === d || host.endsWith("." + d))) {
-      if (urlContainsAny([
-        "/flights/",
-        "/flightsearch",
-        "/hotels/",
-        "/hotels-search",
-        "/cars/",
-        "/carsearch",
-        "/packages",
-        "/vacation-rentals",
-        "/searchresults",
-        "/search/"
-      ])) {
+      if (
+        urlContainsAny([
+          "/flights/",
+          "/flightsearch",
+          "/hotels/",
+          "/hotels-search",
+          "/cars/",
+          "/carsearch",
+          "/packages",
+          "/vacation-rentals",
+          "/searchresults",
+          "/search/"
+        ])
+      ) {
         return true;
       }
     }
 
     // Direct hotel brands
     if (HOTEL_BRANDS.some((d) => host === d || host.endsWith("." + d))) {
-      if (urlContainsAny([
-        "/search",
-        "/reservation/find",
-        "/find-reservation",
-        "/hotels/search"
-      ])) {
+      if (
+        urlContainsAny([
+          "/search",
+          "/reservation/find",
+          "/find-reservation",
+          "/hotels/search"
+        ])
+      ) {
         return true;
       }
     }
 
     // Airlines
     if (AIRLINES.some((d) => host === d || host.endsWith("." + d))) {
-      if (urlContainsAny([
-        "/flight-search",
-        "/book/flights",
-        "/book/flight",
-        "/flights-search",
-        "/search/results",
-        "/fares/search"
-      ])) {
+      if (
+        urlContainsAny([
+          "/flight-search",
+          "/book/flights",
+          "/book/flight",
+          "/flights-search",
+          "/search/results",
+          "/fares/search"
+        ])
+      ) {
         return true;
       }
     }
 
     // Car rental brands
     if (CAR_RENTAL.some((d) => host === d || host.endsWith("." + d))) {
-      if (urlContainsAny([
-        "/car-rental",
-        "/carsearch",
-        "/car/search",
-        "/search",
-        "/locations"
-      ])) {
+      if (
+        urlContainsAny([
+          "/car-rental",
+          "/carsearch",
+          "/car/search",
+          "/search",
+          "/locations"
+        ])
+      ) {
         return true;
       }
     }
 
     // Cruises
     if (CRUISES.some((d) => host === d || host.endsWith("." + d))) {
-      if (urlContainsAny([
-        "/cruise-search",
-        "/search-cruise",
-        "/search-results",
-        "/itineraries"
-      ])) {
+      if (
+        urlContainsAny([
+          "/cruise-search",
+          "/search-cruise",
+          "/search-results",
+          "/itineraries"
+        ])
+      ) {
         return true;
       }
     }
 
     // Regional OTAs & villa / agriturismo style sites
     if (REGIONAL_TRAVEL.some((d) => host === d || host.endsWith("." + d))) {
-      if (urlContainsAny([
-        "/search",
-        "/searchresults",
-        "/results",
-        "/holidays",
-        "/villas",
-        "/farmhouses"
-      ])) {
+      if (
+        urlContainsAny([
+          "/search",
+          "/searchresults",
+          "/results",
+          "/holidays",
+          "/villas",
+          "/farmhouses"
+        ])
+      ) {
         return true;
       }
     }
@@ -452,20 +467,75 @@
     return fees;
   }
 
+  /**
+   * Try to extract a "booking total" from the page text.
+   *
+   * Heuristic:
+   * - Look for lines containing "total" + a currency amount.
+   * - Treat the largest such amount as the booking total.
+   */
+  function extractBookingTotal(rawText) {
+    if (!rawText || typeof rawText !== "string") return null;
+
+    const lines = rawText.split(/\r?\n/);
+    const moneyRegex = /([$€£¥])\s*([0-9][\d.,]*)/;
+    const candidates = [];
+
+    for (const line of lines) {
+      if (!line) continue;
+      if (!/total/i.test(line)) continue;
+
+      const match = line.match(moneyRegex);
+      if (!match) continue;
+
+      const symbol = match[1];
+      const numericRaw = match[2].replace(/,/g, "");
+      const amount = parseFloat(numericRaw);
+      if (!isFinite(amount) || amount <= 0) continue;
+
+      candidates.push({
+        symbol,
+        amount,
+        line: line.trim()
+      });
+    }
+
+    if (!candidates.length) return null;
+
+    // Use the largest "total" we find on the page.
+    candidates.sort((a, b) => b.amount - a.amount);
+    const best = candidates[0];
+
+    return {
+      currencySymbol: best.symbol,
+      amount: best.amount,
+      sourceLine: best.line
+    };
+  }
+
   function buildSnapshot() {
     const rawText = extractPageText();
     const textNormalized = rawText.toLowerCase();
     const airbnbFees = extractAirbnbFees();
+    const bookingSummary = extractBookingTotal(rawText);
 
-    return {
+    const snapshot = {
       url: window.location.href,
       hostname: window.location.hostname,
-      text: rawText,           // legacy
-      textRaw: rawText,        // preferred for rules
+      text: rawText, // legacy
+      textRaw: rawText, // preferred for rules
       textNormalized,
       currencySymbolsDetected: detectCurrencyMarkers(rawText),
       airbnbFees
     };
+
+    if (bookingSummary) {
+      snapshot.bookingTotalAmount = bookingSummary.amount;
+      snapshot.bookingCurrencySymbol = bookingSummary.currencySymbol;
+      snapshot.bookingTotalSourceLine = bookingSummary.sourceLine;
+    }
+
+    return snapshot;
   }
 
   // ------------------------------
@@ -555,8 +625,16 @@
     }
   }
 
-  async function evaluatePolicyLinks(urls) {
-    if (!window.ScribbitRiskEngine || typeof window.ScribbitRiskEngine.evaluatePage !== "function") {
+  /**
+   * Evaluate linked policy/ToS pages with the RiskEngine.
+   * We propagate bookingTotal + currency into these snapshots
+   * so rules can compute $ exposure based on the main checkout page.
+   */
+  async function evaluatePolicyLinks(urls, baseSnapshot) {
+    if (
+      !window.ScribbitRiskEngine ||
+      typeof window.ScribbitRiskEngine.evaluatePage !== "function"
+    ) {
       return [];
     }
 
@@ -573,13 +651,25 @@
 
         const snapshot = {
           url,
-          hostname: (new URL(url)).hostname,
+          hostname: new URL(url).hostname,
           text: text,
           textRaw: text,
           textNormalized: text.toLowerCase(),
           currencySymbolsDetected: detectCurrencyMarkers(text),
           airbnbFees: []
         };
+
+        if (baseSnapshot) {
+          if (typeof baseSnapshot.bookingTotalAmount === "number") {
+            snapshot.bookingTotalAmount = baseSnapshot.bookingTotalAmount;
+          }
+          if (baseSnapshot.bookingCurrencySymbol) {
+            snapshot.bookingCurrencySymbol = baseSnapshot.bookingCurrencySymbol;
+          }
+          if (baseSnapshot.bookingTotalSourceLine) {
+            snapshot.bookingTotalSourceLine = baseSnapshot.bookingTotalSourceLine;
+          }
+        }
 
         const result = window.ScribbitRiskEngine.evaluatePage(snapshot);
         return result || null;
@@ -738,7 +828,7 @@
             "[Scribbit] scanner.js: enriching from policy links:",
             policyLinks
           );
-          const policyResults = await evaluatePolicyLinks(policyLinks);
+          const policyResults = await evaluatePolicyLinks(policyLinks, snapshot);
           if (policyResults && policyResults.length > 0) {
             finalResult = mergeRiskResults(primaryResult, policyResults);
           }
