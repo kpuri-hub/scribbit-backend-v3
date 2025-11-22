@@ -7,8 +7,9 @@
 // - Decide WHEN to scan (skip search engines, blocked domains,
 //   and search results pages on major travel sites)
 // - Detect SPA-style URL changes (Airbnb, OTAs) and re-scan
-// - If main page has too little meaningful content, silently fetch
-//   linked policy/ToS/refund pages, evaluate them, and MERGE risks
+// - If main page does not have enough meaningful content OR is a
+//   high-risk checkout-like page, silently fetch linked policy/ToS/refund
+//   pages, evaluate them, and MERGE risks
 // - Call ScribbitRiskEngine.evaluatePage(snapshot)
 // - Send a single combined riskResult via ScribbitMessaging
 //
@@ -674,6 +675,31 @@
     return finalResult;
   }
 
+  // ------------------------------
+  // High-risk checkout-like pages
+  // ------------------------------
+
+  function isHighRiskCheckoutLikePage(hostname, url) {
+    const host = (hostname || "").toLowerCase();
+    const path = getPathname(url);
+
+    // Airbnb checkout / booking / payment flows
+    if (host.endsWith("airbnb.com") || host.endsWith("airbnb.ca")) {
+      if (
+        path.includes("/checkout") ||
+        path.includes("/book") ||
+        path.includes("/reservation") ||
+        path.includes("/payments")
+      ) {
+        return true;
+      }
+    }
+
+    // In future: extend to other sites (Booking, Expedia, airlines...) here.
+
+    return false;
+  }
+
   // ---------------------------------------------------------------------------
   // Core scan + enrichment
   // ---------------------------------------------------------------------------
@@ -698,13 +724,18 @@
 
       let finalResult = primaryResult;
 
-      // If the main page doesn't have enough meaningful content,
-      // silently look for linked policy/ToS pages and merge their risks.
-      if (!primaryResult.hasMeaningfulContent) {
+      const shouldUsePolicyLinks =
+        !primaryResult.hasMeaningfulContent ||
+        isHighRiskCheckoutLikePage(snapshot.hostname, snapshot.url);
+
+      // If the main page doesn't have enough meaningful content OR is a
+      // high-risk checkout-like page (e.g., Airbnb checkout), silently look
+      // for linked policy/ToS pages and merge their risks.
+      if (shouldUsePolicyLinks) {
         const policyLinks = findPolicyLinks();
         if (policyLinks.length > 0) {
           console.debug(
-            "[Scribbit] scanner.js: main page low-content, evaluating policy links:",
+            "[Scribbit] scanner.js: enriching from policy links:",
             policyLinks
           );
           const policyResults = await evaluatePolicyLinks(policyLinks);
@@ -759,7 +790,7 @@
 
     try {
       dynamicObserver = new MutationObserver(() => {
-        // Throttle re-scans to avoid hammering the backend/engine
+        // Throttle re-scans to avoid hammering the engine
         if (mutationScanTimeout) return;
         mutationScanTimeout = setTimeout(() => {
           mutationScanTimeout = null;
