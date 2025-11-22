@@ -686,3 +686,225 @@
     card.dataset.category = categoryKey;
 
     const header = document.createElement("div");
+    header.className = "scribbit-category-header";
+
+    const headerLeft = document.createElement("div");
+    headerLeft.className = "scribbit-category-header-left";
+
+    const icon = document.createElement("div");
+    icon.className = "scribbit-category-icon";
+
+    const nameEl = document.createElement("div");
+    nameEl.className = "scribbit-category-name";
+    nameEl.textContent = CATEGORY_LABELS[categoryKey] || categoryKey;
+
+    headerLeft.appendChild(icon);
+    headerLeft.appendChild(nameEl);
+
+    const headerRight = document.createElement("div");
+    headerRight.className = "scribbit-category-header-right";
+
+    const categoryScore =
+      categoryScores && typeof categoryScores[categoryKey] === "number"
+        ? categoryScores[categoryKey]
+        : null;
+
+    const level = summarizeCategorySeverity(risks, categoryScore);
+    const levelEl = document.createElement("span");
+    levelEl.className = "scribbit-category-level " + severityClass(level);
+    levelEl.textContent = severityLabel(level);
+
+    const countEl = document.createElement("span");
+    countEl.className = "scribbit-category-count";
+    countEl.textContent = countLabel(risks.length);
+
+    const scoreEl = document.createElement("span");
+    scoreEl.className = "scribbit-category-score";
+    if (categoryScore != null) {
+      scoreEl.textContent = `${Math.round(categoryScore)}/100`;
+    } else {
+      scoreEl.textContent = "";
+    }
+
+    headerRight.appendChild(levelEl);
+    headerRight.appendChild(countEl);
+    if (categoryScore != null) {
+      headerRight.appendChild(scoreEl);
+    }
+
+    header.appendChild(headerLeft);
+    header.appendChild(headerRight);
+
+    const barOuter = document.createElement("div");
+    barOuter.className = "scribbit-category-bar-outer";
+
+    const barInner = document.createElement("div");
+    barInner.className = "scribbit-category-bar-inner " + severityClass(level);
+
+    let widthPercent = 0;
+    if (categoryScore != null) {
+      widthPercent = Math.max(0, Math.min(100, categoryScore));
+    } else if (risks.length > 0) {
+      if (level === "high") widthPercent = 100;
+      else if (level === "medium") widthPercent = 66;
+      else widthPercent = 33;
+    }
+    barInner.style.width = widthPercent + "%";
+
+    barOuter.appendChild(barInner);
+
+    const body = document.createElement("div");
+    body.className = "scribbit-category-body";
+
+    const riskRows = document.createElement("div");
+    riskRows.className = "scribbit-risk-rows";
+
+    if (risks.length > 0) {
+      risks.forEach((risk, idx) => {
+        const group = createRiskGroup(categoryKey, risk, idx);
+        riskRows.appendChild(group);
+      });
+    } else {
+      riskRows.appendChild(createNoRiskRow());
+    }
+
+    body.appendChild(riskRows);
+
+    card.appendChild(header);
+    card.appendChild(barOuter);
+    card.appendChild(body);
+
+    return card;
+  }
+
+  // ----- Main update/render --------------------------------------------------
+
+  function updatePanel(rawRiskResult) {
+    const riskResult = normalizeRiskResult(rawRiskResult);
+    const existingPanel = document.getElementById(PANEL_ID);
+
+    if (panelManuallyHidden) {
+      if (existingPanel) existingPanel.style.display = "none";
+      return;
+    }
+
+    const risksArray = riskResult && Array.isArray(riskResult.risks) ? riskResult.risks : [];
+    const hasMeaningfulContent =
+      riskResult && typeof riskResult.hasMeaningfulContent === "boolean"
+        ? riskResult.hasMeaningfulContent
+        : risksArray.length > 0;
+
+    // If nothing meaningful to show, hide the panel
+    if (!riskResult || (!hasMeaningfulContent && risksArray.length === 0)) {
+      if (existingPanel) existingPanel.style.display = "none";
+      return;
+    }
+
+    injectStylesheet();
+    const panelEl = existingPanel || createPanelShell();
+
+    const summaryEl = panelEl.querySelector("#scribbit-panel-summary");
+    const scoreEl = panelEl.querySelector("#scribbit-panel-score");
+    const categoryList = panelEl.querySelector("#scribbit-category-list");
+
+    const overallLevel = String(riskResult.overallLevel || "").toLowerCase();
+    const overallScore =
+      typeof riskResult.overallScore === "number"
+        ? riskResult.overallScore
+        : typeof riskResult.riskScore === "number"
+        ? riskResult.riskScore
+        : null;
+
+    if (summaryEl) {
+      const levelLabel = severityLabel(overallLevel);
+      if (overallScore == null && levelLabel === "No issues") {
+        summaryEl.textContent = "Some terms on this page may deserve a closer look.";
+      } else if (overallScore == null) {
+        summaryEl.textContent = `Overall risk: ${levelLabel}`;
+      } else {
+        summaryEl.textContent = `Overall risk: ${levelLabel} (${Math.round(
+          overallScore
+        )}/100)`;
+      }
+    }
+
+    if (scoreEl) {
+      if (overallScore != null) {
+        scoreEl.textContent = `Scribbit Risk Score: ${Math.round(overallScore)}/100`;
+      } else {
+        scoreEl.textContent = "";
+      }
+    }
+
+    if (categoryList) {
+      while (categoryList.firstChild) {
+        categoryList.removeChild(categoryList.firstChild);
+      }
+
+      const grouped = groupRisksByCategory(riskResult);
+      const categoryScores =
+        riskResult && typeof riskResult.categoryScores === "object"
+          ? riskResult.categoryScores
+          : {};
+
+      CATEGORY_ORDER.forEach((catKey) => {
+        const catRisks = grouped[catKey] || [];
+        const card = createCategoryCard(catKey, catRisks, categoryScores);
+        categoryList.appendChild(card);
+      });
+    }
+
+    applyInitialPanelMode(panelEl);
+    panelEl.style.display = "block";
+  }
+
+  // ----- Dependency waiting & wiring ----------------------------------------
+
+  function waitForDependencies(callback, maxTries = 30, delayMs = 200) {
+    let tries = 0;
+    const interval = setInterval(() => {
+      if (window.ScribbitMessaging) {
+        clearInterval(interval);
+        callback();
+        return;
+      }
+      if (tries++ >= maxTries) {
+        clearInterval(interval);
+        console.warn(
+          "[Scribbit] panel.js: ScribbitMessaging not available after retries"
+        );
+      }
+    }, delayMs);
+  }
+
+  function init() {
+    // Skip iframes; only run in top frame
+    if (window.top !== window.self) return;
+
+    waitForDependencies(() => {
+      // Streamed updates (SPAs, dynamic content, etc.)
+      window.ScribbitMessaging.onRiskUpdated((payload) => {
+        updatePanel(payload);
+      });
+
+      // Initial state on first load
+      window.ScribbitMessaging.requestCurrentRisk().then(
+        (res) => {
+          const normalized = normalizeRiskResult(
+            res && (res.risk || res.riskResult || res.payload || res)
+          );
+          if (normalized) updatePanel(normalized);
+        },
+        (err) => {
+          console.warn("[Scribbit] requestCurrentRisk failed in panel.js:", err);
+        }
+      );
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();

@@ -1,5 +1,5 @@
 /* ui/panel.css */
-/* Scribbit Fairness Scanner - Panel 2.0 Styles (Category → Risk Rows → Details) */
+/* Scribbit Fairness Scanner - Panel 2.0 Styles (Category → Risk Rows → Hover Details) */
 
 #scribbit-fairness-panel {
   position: fixed;
@@ -214,11 +214,10 @@
   padding: 6px;
 }
 
-/* Risk row (collapsed view) */
+/* Risk row layout: icon + wide text + small link */
 
 .scribbit-risk-row {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
+  display: flex;
   align-items: flex-start;
   gap: 6px;
 }
@@ -228,6 +227,7 @@
   height: 14px;
   border-radius: 999px;
   margin-top: 2px;
+  flex-shrink: 0;
 }
 
 /* Green check icon for no-risk row */
@@ -249,7 +249,15 @@
   color: #16a34a;
 }
 
-/* Risk main text */
+/* Risk content: main text + small action link underneath */
+
+.scribbit-risk-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
 
 .scribbit-risk-main {
   display: flex;
@@ -278,7 +286,7 @@
   cursor: pointer;
   padding: 0;
   margin: 0;
-  white-space: nowrap;
+  align-self: flex-start;
 }
 
 .scribbit-risk-toggle:hover {
@@ -292,13 +300,28 @@
   padding: 0;
 }
 
-/* Risk details (expanded view) */
+/* Details container (used as content source for tooltip; kept hidden) */
 
 .scribbit-risk-details {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px solid #e5e7eb;
+  display: none;
 }
+
+/* Tooltip card shown on hover */
+
+.scribbit-risk-tooltip {
+  position: absolute;
+  max-width: 320px;
+  background: #ffffff;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.22);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #111827;
+  z-index: 2;
+}
+
+/* Inner structure reused from details */
 
 .scribbit-risk-why-matters {
   font-size: 12px;
@@ -313,7 +336,7 @@
   padding-left: 18px;
   font-size: 11px;
   color: #374151;
-  max-height: 90px;
+  max-height: 120px;
   overflow-y: auto;
 }
 
