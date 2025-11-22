@@ -1,52 +1,115 @@
 // ui/panel.js
-// Scribbit Fairness Scanner - On-page Panel (Risk v2 UI with Mini Mode)
+// Scribbit Fairness Scanner - On-page Panel 2.0 (Category → Risk Rows → Details)
 //
 // Behaviour:
-// - ONLY shows if there is at least 1 risk overall
-// - Renders 4 categories (Financial, Data, Content, Legal) when visible
-// - Each category shows: name, severity, bar, and # of issues
-// - Category detail lists are collapsed by default until user clicks
-// - Each risk card can show evidence in an expandable details area
-// - Panel has a close button that hides it completely for this page load
-// - Panel supports FULL vs MINI mode, toggled by clicking the header
+// - Renders 5 fixed categories from canonical Risk Model v2:
+//     financialExposure, refundAndCancellation, subscriptionAndBilling,
+//     dataPrivacy, legalRights
+// - Each category shows: name, severity badge, bar, and # of risks
+// - Category body shows risk rows; each row has:
+//     icon, title, one-line summary, "Why is this risky?" toggle
+// - Each risk row toggles an expandable details section:
+//     "Why this matters", evidence snippets, optional fee breakdown
+// - Categories with zero risks show a green ✓ "No risks detected" row
+// - Panel supports FULL vs MINI mode, toggled by header
 // - Panel remembers FULL/MINI per-domain in chrome.storage.local
+// - Panel listens to ScribbitMessaging for canonical riskResult:
 //
-// It consumes the Risk Engine result object:
 //   {
-//     risks: [ { id, category, title, description, severity, evidence?, ... }, ... ],
-//     categoryScores: { financial, data_privacy, content_ip, legal_rights },
-//     riskScore,
-//     overallLevel
+//     riskScore: number,
+//     overallLevel: "LOW" | "MEDIUM" | "HIGH",
+//     overallScore: number,
+//     hasMeaningfulContent: boolean,
+//     categoryScores: {
+//       financialExposure,
+//       refundAndCancellation,
+//       subscriptionAndBilling,
+//       dataPrivacy,
+//       legalRights
+//     },
+//     risks: [
+//       { category: string, title: string, evidence: string[], severity: "LOW" | "MEDIUM" | "HIGH" }
+//     ]
 //   }
 
 (function () {
   const PANEL_ID = "scribbit-fairness-panel";
 
-  const CATEGORY_ORDER = ["financial", "data_privacy", "content_ip", "legal_rights"];
+  // Canonical category keys and labels (Panel 2.0)
+  const CATEGORY_ORDER = [
+    "financialExposure",
+    "refundAndCancellation",
+    "subscriptionAndBilling",
+    "dataPrivacy",
+    "legalRights"
+  ];
 
   const CATEGORY_LABELS = {
-    financial: "Financial Exposure",
-    data_privacy: "Personal Data & Privacy",
-    content_ip: "Content & Image Rights",
-    legal_rights: "Legal Rights & Control"
+    financialExposure: "Financial Exposure",
+    refundAndCancellation: "Refunds & Cancellations",
+    subscriptionAndBilling: "Subscription & Billing",
+    dataPrivacy: "Personal Data & Privacy",
+    legalRights: "Legal Rights & Control"
   };
 
   const PANEL_STATE_STORAGE_KEY = "scribbit_panel_state_v1";
 
   let panelManuallyHidden = false;
-  // Default to MINI (safer visually) until we load real value from storage
-  let currentPanelMode = "mini";
+  let currentPanelMode = "mini"; // default visually
   let panelModeInitialized = false;
 
-  // ----- Helpers -------------------------------------------------------------
+  // Tracks which risk rows are expanded: "<category>::<index>"
+  const expandedRiskKeys = new Set();
+
+  // ----- Helpers: normalization & mapping -----------------------------------
 
   function normalizeRiskResult(maybe) {
     if (!maybe) return null;
-    if (maybe.riskResult) return maybe.riskResult;
-    if (maybe.risk) return maybe.risk;
-    if (Array.isArray(maybe.risks) || maybe.categoryScores) return maybe;
+
+    // Already looks canonical
+    if (
+      Array.isArray(maybe.risks) ||
+      typeof maybe.riskScore === "number" ||
+      typeof maybe.overallScore === "number"
+    ) {
+      return maybe;
+    }
+
+    if (maybe.riskResult) return normalizeRiskResult(maybe.riskResult);
+    if (maybe.risk) return normalizeRiskResult(maybe.risk);
     if (maybe.payload) return normalizeRiskResult(maybe.payload);
+
     return null;
+  }
+
+  function mapCategoryKey(rawCategory) {
+    if (!rawCategory) return "financialExposure";
+    const c = String(rawCategory).trim();
+
+    // Prefer canonical keys if already present
+    if (CATEGORY_ORDER.includes(c)) return c;
+
+    const lower = c.toLowerCase();
+
+    // Backwards compatibility for older riskEngine category values
+    if (lower === "financial") return "financialExposure";
+    if (lower === "refund" || lower === "refunds" || lower === "refund_cancellation") {
+      return "refundAndCancellation";
+    }
+    if (
+      lower === "subscription" ||
+      lower === "billing" ||
+      lower === "subscription_billing"
+    ) {
+      return "subscriptionAndBilling";
+    }
+    if (lower === "data_privacy" || lower === "privacy") return "dataPrivacy";
+    if (lower === "legal_rights" || lower === "legal" || lower === "terms") {
+      return "legalRights";
+    }
+
+    // Fallback: bucket unknown categories into Legal
+    return "legalRights";
   }
 
   function groupRisksByCategory(riskResult) {
@@ -58,26 +121,39 @@
     const risks = Array.isArray(riskResult.risks) ? riskResult.risks : [];
 
     risks.forEach((risk) => {
-      const cat = risk.category || "financial";
-      if (!grouped[cat]) grouped[cat] = [];
-      grouped[cat].push(risk);
+      const mappedKey = mapCategoryKey(risk.category);
+      if (!grouped[mappedKey]) grouped[mappedKey] = [];
+      grouped[mappedKey].push(risk);
     });
 
     return grouped;
   }
 
-  function summarizeCategorySeverity(risks) {
-    if (!risks || risks.length === 0) return "none";
-    let hasHigh = false;
-    let hasMedium = false;
-    for (const r of risks) {
-      const sev = String(r.severity || "").toLowerCase();
-      if (sev === "high") hasHigh = true;
-      else if (sev === "medium") hasMedium = true;
+  function severityFromScore(score) {
+    if (typeof score !== "number" || Number.isNaN(score)) return "none";
+    if (score >= 67) return "high";
+    if (score >= 34) return "medium";
+    if (score > 0) return "low";
+    return "none";
+  }
+
+  function summarizeCategorySeverity(risks, categoryScore) {
+    // Prefer actual risks if present
+    if (risks && risks.length > 0) {
+      let hasHigh = false;
+      let hasMedium = false;
+      for (const r of risks) {
+        const sev = String(r.severity || "").toLowerCase();
+        if (sev === "high") hasHigh = true;
+        else if (sev === "medium") hasMedium = true;
+      }
+      if (hasHigh) return "high";
+      if (hasMedium) return "medium";
+      return "low";
     }
-    if (hasHigh) return "high";
-    if (hasMedium) return "medium";
-    return "low";
+
+    // If no explicit risks, infer from category score
+    return severityFromScore(categoryScore);
   }
 
   function severityLabel(level) {
@@ -107,9 +183,9 @@
   }
 
   function countLabel(count) {
-    if (!count || count <= 0) return "No issues";
-    if (count === 1) return "1 issue";
-    return `${count} issues`;
+    if (!count || count <= 0) return "No risks detected";
+    if (count === 1) return "1 risk detected";
+    return `${count} risks detected`;
   }
 
   function getHostname() {
@@ -118,6 +194,62 @@
     } catch {
       return "";
     }
+  }
+
+  function getOneLineSummary(risk) {
+    // Prefer a short evidence snippet as the one-line summary
+    const evidence = Array.isArray(risk.evidence) ? risk.evidence : [];
+    if (evidence.length > 0 && typeof evidence[0] === "string") {
+      const first = evidence[0].trim().replace(/\s+/g, " ");
+      if (first.length <= 160) return first;
+      return first.slice(0, 157) + "…";
+    }
+    // Fallback summary by category
+    const cat = mapCategoryKey(risk.category);
+    switch (cat) {
+      case "financialExposure":
+        return "May increase your total cost or add hidden fees.";
+      case "refundAndCancellation":
+        return "Refunds or cancellations may be more restricted than expected.";
+      case "subscriptionAndBilling":
+        return "Auto-renew or billing terms could be hard to cancel.";
+      case "dataPrivacy":
+        return "Personal data may be shared, tracked, or retained more than expected.";
+      case "legalRights":
+      default:
+        return "Terms here may limit your rights or make disputes harder.";
+    }
+  }
+
+  function deriveWhyThisMatters(risk) {
+    const title = risk.title || "This risk matters";
+    const evidence = Array.isArray(risk.evidence) ? risk.evidence : [];
+    if (evidence.length > 0 && typeof evidence[0] === "string") {
+      return `${title} — pay attention to this wording before you continue.`;
+    }
+    return `${title} could impact your costs, refunds, or legal rights.`;
+  }
+
+  function extractFeeSnippets(evidence) {
+    if (!Array.isArray(evidence) || evidence.length === 0) return [];
+    const feeSnippets = [];
+
+    const feeRegex = /\b(fee|fees|surcharge|markup|mark-up|commission|service charge)\b/i;
+    const percentRegex = /(\d+(\.\d+)?)\s*%/;
+    const moneyRegex = /\$\s?\d[\d,]*(\.\d+)?/;
+
+    for (const line of evidence) {
+      if (typeof line !== "string") continue;
+      const hasFeeWord = feeRegex.test(line);
+      const hasPercent = percentRegex.test(line);
+      const hasMoney = moneyRegex.test(line);
+
+      if (hasFeeWord || hasPercent || hasMoney) {
+        feeSnippets.push(line.trim());
+      }
+    }
+
+    return feeSnippets;
   }
 
   // ----- Storage for per-domain panel mode ----------------------------------
@@ -214,7 +346,7 @@
       if (mode === "mini" || mode === "full") {
         setPanelMode(panel, mode);
       }
-      // If null, we just keep the default "mini" for new domains
+      // If null, we keep default "mini" for new domains
     });
   }
 
@@ -224,7 +356,7 @@
 
     panel = document.createElement("div");
     panel.id = PANEL_ID;
-    panel.style.display = "none"; // we'll show it in updatePanel
+    panel.style.display = "none"; // will show in updatePanel
     panel.classList.add("scribbit-panel-mini"); // default mini until we know better
 
     // Header
@@ -308,151 +440,100 @@
     return panel;
   }
 
-  function createCategoryCard(categoryKey, risks) {
-    const card = document.createElement("div");
-    card.className = "scribbit-category-card";
-    card.dataset.category = categoryKey;
+  function createNoRiskRow(categoryKey) {
+    const row = document.createElement("div");
+    row.className = "scribbit-risk-row scribbit-no-risks";
 
-    const header = document.createElement("div");
-    header.className = "scribbit-category-header";
+    const icon = document.createElement("div");
+    icon.className = "scribbit-risk-icon scribbit-risk-icon-ok";
 
-    const nameEl = document.createElement("div");
-    nameEl.className = "scribbit-category-name";
-    nameEl.textContent = CATEGORY_LABELS[categoryKey] || categoryKey;
+    const main = document.createElement("div");
+    main.className = "scribbit-risk-main";
 
-    const headerRight = document.createElement("div");
-    headerRight.className = "scribbit-category-header-right";
+    const title = document.createElement("div");
+    title.className = "scribbit-risk-title";
+    title.textContent = "No risks detected";
 
-    const level = summarizeCategorySeverity(risks);
-    const levelEl = document.createElement("span");
-    levelEl.className = "scribbit-category-level " + severityClass(level);
-    levelEl.textContent = severityLabel(level);
+    const summary = document.createElement("div");
+    summary.className = "scribbit-risk-summary";
+    summary.textContent = "Nothing concerning found in this category on this page.";
 
-    const countEl = document.createElement("span");
-    countEl.className = "scribbit-category-count";
-    countEl.textContent = countLabel(risks.length);
+    main.appendChild(title);
+    main.appendChild(summary);
 
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "scribbit-category-toggle";
-    toggle.textContent = "▾";
-    toggle.setAttribute("aria-label", "Toggle issues in this category");
+    row.appendChild(icon);
+    row.appendChild(main);
 
-    headerRight.appendChild(levelEl);
-    headerRight.appendChild(countEl);
-    headerRight.appendChild(toggle);
-
-    header.appendChild(nameEl);
-    header.appendChild(headerRight);
-
-    const barOuter = document.createElement("div");
-    barOuter.className = "scribbit-category-bar-outer";
-
-    const barInner = document.createElement("div");
-    barInner.className = "scribbit-category-bar-inner " + severityClass(level);
-
-    let widthPercent = 0;
-    if (risks.length > 0) {
-      if (level === "high") widthPercent = 100;
-      else if (level === "medium") widthPercent = 66;
-      else widthPercent = 33;
-    }
-    barInner.style.width = widthPercent + "%";
-
-    barOuter.appendChild(barInner);
-
-    const issuesList = document.createElement("div");
-    issuesList.className = "scribbit-category-issues";
-
-    if (risks.length > 0) {
-      risks.forEach((risk) => {
-        issuesList.appendChild(createRiskItem(risk));
-      });
-    } else {
-      const empty = document.createElement("div");
-      empty.className = "scribbit-category-empty";
-      empty.textContent = "No notable issues found in this area.";
-      issuesList.appendChild(empty);
-    }
-
-    card.appendChild(header);
-    card.appendChild(barOuter);
-    card.appendChild(issuesList);
-
-    // DEFAULT: collapsed, even if risks exist
-    let expanded = false;
-    updateCategoryExpandedState(card, expanded);
-
-    header.addEventListener("click", (evt) => {
-      expanded = !expanded;
-      updateCategoryExpandedState(card, expanded);
-    });
-
-    toggle.addEventListener("click", (evt) => {
-      evt.stopPropagation();
-      expanded = !expanded;
-      updateCategoryExpandedState(card, expanded);
-    });
-
-    return card;
+    return row;
   }
 
-  function updateCategoryExpandedState(card, expanded) {
-    if (!card) return;
-    const issuesList = card.querySelector(".scribbit-category-issues");
-    const toggle = card.querySelector(".scribbit-category-toggle");
-    if (!issuesList || !toggle) return;
+  function setRiskDetailsExpanded(groupEl, expanded) {
+    const detailsEl = groupEl.querySelector(".scribbit-risk-details");
+    const toggleBtn = groupEl.querySelector(".scribbit-risk-toggle");
+    if (!detailsEl || !toggleBtn) return;
 
     if (expanded) {
-      card.classList.remove("scribbit-category-collapsed");
-      issuesList.style.display = "block";
-      toggle.textContent = "▾";
+      detailsEl.hidden = false;
+      toggleBtn.setAttribute("aria-expanded", "true");
     } else {
-      card.classList.add("scribbit-category-collapsed");
-      issuesList.style.display = "none";
-      toggle.textContent = "▸";
+      detailsEl.hidden = true;
+      toggleBtn.setAttribute("aria-expanded", "false");
     }
   }
 
-  function createRiskItem(risk) {
-    const item = document.createElement("div");
-    item.className = "scribbit-risk-item";
+  function createRiskGroup(categoryKey, risk, index) {
+    const riskKey = `${categoryKey}::${index}`;
+    const group = document.createElement("div");
+    group.className = "scribbit-risk-group";
+    group.dataset.category = categoryKey;
+    group.dataset.riskKey = riskKey;
 
-    const titleRow = document.createElement("div");
-    titleRow.className = "scribbit-risk-title-row";
+    // Collapsed row
+    const row = document.createElement("div");
+    row.className = "scribbit-risk-row";
+
+    const icon = document.createElement("div");
+    icon.className =
+      "scribbit-risk-icon " + severityClass(risk.severity || "low");
+
+    const main = document.createElement("div");
+    main.className = "scribbit-risk-main";
 
     const title = document.createElement("div");
     title.className = "scribbit-risk-title";
     title.textContent = risk.title || "Risk";
 
-    const chip = document.createElement("span");
-    chip.className = "scribbit-risk-severity " + severityClass(risk.severity);
-    chip.textContent = severityLabel(risk.severity);
+    const summary = document.createElement("div");
+    summary.className = "scribbit-risk-summary";
+    summary.textContent = getOneLineSummary(risk);
 
-    const whyBtn = document.createElement("button");
-    whyBtn.className = "scribbit-risk-why";
-    whyBtn.type = "button";
-    whyBtn.textContent = "Why is this risky?";
+    main.appendChild(title);
+    main.appendChild(summary);
 
-    titleRow.appendChild(title);
-    titleRow.appendChild(chip);
-    titleRow.appendChild(whyBtn);
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className = "scribbit-risk-toggle";
+    toggleBtn.textContent = "Why is this risky?";
+    const detailsId = `scribbit-risk-details-${categoryKey}-${index}`;
+    toggleBtn.setAttribute("aria-controls", detailsId);
+    toggleBtn.setAttribute("aria-expanded", "false");
 
-    const desc = document.createElement("div");
-    desc.className = "scribbit-risk-description";
-    desc.textContent = risk.description || "";
+    row.appendChild(icon);
+    row.appendChild(main);
+    row.appendChild(toggleBtn);
 
-    const evidenceContainer = document.createElement("div");
-    evidenceContainer.className = "scribbit-risk-evidence-container";
+    // Expanded details
+    const details = document.createElement("div");
+    details.className = "scribbit-risk-details";
+    details.id = detailsId;
+    details.hidden = true;
 
-    const evidenceToggle = document.createElement("button");
-    evidenceToggle.type = "button";
-    evidenceToggle.className = "scribbit-risk-evidence-toggle";
-    evidenceToggle.textContent = "Show details ▾";
+    const whyMatters = document.createElement("div");
+    whyMatters.className = "scribbit-risk-why-matters";
+    whyMatters.textContent = deriveWhyThisMatters(risk);
 
     const evidenceList = document.createElement("ul");
-    evidenceList.className = "scribbit-risk-evidence";
-    evidenceList.style.display = "none";
+    evidenceList.className = "scribbit-risk-evidence-list";
 
     const evidence = Array.isArray(risk.evidence) ? risk.evidence : [];
     if (evidence.length > 0) {
@@ -468,30 +549,149 @@
       evidenceList.appendChild(li);
     }
 
-    let evidenceExpanded = false;
-    evidenceToggle.addEventListener("click", () => {
-      evidenceExpanded = !evidenceExpanded;
-      if (evidenceExpanded) {
-        evidenceList.style.display = "block";
-        evidenceToggle.textContent = "Hide details ▴";
+    const feeSnippets = extractFeeSnippets(evidence);
+    let feeBlock = null;
+    if (feeSnippets.length > 0) {
+      feeBlock = document.createElement("div");
+      feeBlock.className = "scribbit-risk-fee-breakdown";
+
+      const feeTitle = document.createElement("div");
+      feeTitle.className = "scribbit-risk-fee-title";
+      feeTitle.textContent = "Fee / FX details:";
+
+      const feeList = document.createElement("ul");
+      feeList.className = "scribbit-risk-fee-list";
+
+      feeSnippets.forEach((line) => {
+        const li = document.createElement("li");
+        li.textContent = line;
+        feeList.appendChild(li);
+      });
+
+      feeBlock.appendChild(feeTitle);
+      feeBlock.appendChild(feeList);
+    }
+
+    details.appendChild(whyMatters);
+    details.appendChild(evidenceList);
+    if (feeBlock) details.appendChild(feeBlock);
+
+    group.appendChild(row);
+    group.appendChild(details);
+
+    // Apply initial expanded state based on Set
+    const initiallyExpanded = expandedRiskKeys.has(riskKey);
+    setRiskDetailsExpanded(group, initiallyExpanded);
+
+    toggleBtn.addEventListener("click", () => {
+      const currentlyExpanded = expandedRiskKeys.has(riskKey);
+      if (currentlyExpanded) {
+        expandedRiskKeys.delete(riskKey);
+        setRiskDetailsExpanded(group, false);
       } else {
-        evidenceList.style.display = "none";
-        evidenceToggle.textContent = "Show details ▾";
+        expandedRiskKeys.add(riskKey);
+        setRiskDetailsExpanded(group, true);
       }
     });
 
-    evidenceContainer.appendChild(evidenceToggle);
-    evidenceContainer.appendChild(evidenceList);
+    return group;
+  }
 
-    item.appendChild(titleRow);
-    item.appendChild(desc);
-    item.appendChild(evidenceContainer);
+  function createCategoryCard(categoryKey, risks, categoryScores) {
+    const card = document.createElement("div");
+    card.className = "scribbit-category-card";
+    card.dataset.category = categoryKey;
 
-    whyBtn.addEventListener("click", () => {
-      desc.scrollIntoView({ behavior: "smooth", block: "center" });
-    });
+    const header = document.createElement("div");
+    header.className = "scribbit-category-header";
 
-    return item;
+    const headerLeft = document.createElement("div");
+    headerLeft.className = "scribbit-category-header-left";
+
+    const icon = document.createElement("div");
+    icon.className = "scribbit-category-icon";
+
+    const nameEl = document.createElement("div");
+    nameEl.className = "scribbit-category-name";
+    nameEl.textContent = CATEGORY_LABELS[categoryKey] || categoryKey;
+
+    headerLeft.appendChild(icon);
+    headerLeft.appendChild(nameEl);
+
+    const headerRight = document.createElement("div");
+    headerRight.className = "scribbit-category-header-right";
+
+    const categoryScore =
+      categoryScores && typeof categoryScores[categoryKey] === "number"
+        ? categoryScores[categoryKey]
+        : null;
+
+    const level = summarizeCategorySeverity(risks, categoryScore);
+    const levelEl = document.createElement("span");
+    levelEl.className = "scribbit-category-level " + severityClass(level);
+    levelEl.textContent = severityLabel(level);
+
+    const countEl = document.createElement("span");
+    countEl.className = "scribbit-category-count";
+    countEl.textContent = countLabel(risks.length);
+
+    const scoreEl = document.createElement("span");
+    scoreEl.className = "scribbit-category-score";
+    if (categoryScore != null) {
+      scoreEl.textContent = `${Math.round(categoryScore)}/100`;
+    } else {
+      scoreEl.textContent = "";
+    }
+
+    headerRight.appendChild(levelEl);
+    headerRight.appendChild(countEl);
+    if (categoryScore != null) {
+      headerRight.appendChild(scoreEl);
+    }
+
+    header.appendChild(headerLeft);
+    header.appendChild(headerRight);
+
+    const barOuter = document.createElement("div");
+    barOuter.className = "scribbit-category-bar-outer";
+
+    const barInner = document.createElement("div");
+    barInner.className = "scribbit-category-bar-inner " + severityClass(level);
+
+    let widthPercent = 0;
+    if (categoryScore != null) {
+      widthPercent = Math.max(0, Math.min(100, categoryScore));
+    } else if (risks.length > 0) {
+      if (level === "high") widthPercent = 100;
+      else if (level === "medium") widthPercent = 66;
+      else widthPercent = 33;
+    }
+    barInner.style.width = widthPercent + "%";
+
+    barOuter.appendChild(barInner);
+
+    const body = document.createElement("div");
+    body.className = "scribbit-category-body";
+
+    const riskRows = document.createElement("div");
+    riskRows.className = "scribbit-risk-rows";
+
+    if (risks.length > 0) {
+      risks.forEach((risk, idx) => {
+        const group = createRiskGroup(categoryKey, risk, idx);
+        riskRows.appendChild(group);
+      });
+    } else {
+      riskRows.appendChild(createNoRiskRow(categoryKey));
+    }
+
+    body.appendChild(riskRows);
+
+    card.appendChild(header);
+    card.appendChild(barOuter);
+    card.appendChild(body);
+
+    return card;
   }
 
   // ----- Main update/render --------------------------------------------------
@@ -505,7 +705,14 @@
       return;
     }
 
-    if (!riskResult || !Array.isArray(riskResult.risks) || riskResult.risks.length === 0) {
+    const risksArray = riskResult && Array.isArray(riskResult.risks) ? riskResult.risks : [];
+    const hasMeaningfulContent =
+      riskResult && typeof riskResult.hasMeaningfulContent === "boolean"
+        ? riskResult.hasMeaningfulContent
+        : risksArray.length > 0;
+
+    // If nothing meaningful to show, hide the panel
+    if (!riskResult || (!hasMeaningfulContent && risksArray.length === 0)) {
       if (existingPanel) existingPanel.style.display = "none";
       return;
     }
@@ -518,38 +725,49 @@
     const categoryList = panelEl.querySelector("#scribbit-category-list");
 
     const overallLevel = String(riskResult.overallLevel || "").toLowerCase();
-    const riskScore =
-      typeof riskResult.riskScore === "number" ? riskResult.riskScore : null;
+    const overallScore =
+      typeof riskResult.overallScore === "number"
+        ? riskResult.overallScore
+        : typeof riskResult.riskScore === "number"
+        ? riskResult.riskScore
+        : null;
 
     if (summaryEl) {
-      let levelLabel = severityLabel(overallLevel);
-      if (!riskScore && levelLabel === "No issues") {
+      const levelLabel = severityLabel(overallLevel);
+      if (overallScore == null && levelLabel === "No issues") {
         summaryEl.textContent = "Some terms on this page may deserve a closer look.";
-      } else if (!riskScore) {
+      } else if (overallScore == null) {
         summaryEl.textContent = `Overall risk: ${levelLabel}`;
       } else {
-        summaryEl.textContent = `Overall risk: ${levelLabel} (${riskScore}/100)`;
+        summaryEl.textContent = `Overall risk: ${levelLabel} (${Math.round(
+          overallScore
+        )}/100)`;
       }
     }
 
     if (scoreEl) {
-      if (riskScore != null) {
-        scoreEl.textContent = `Scribbit Risk Score: ${riskScore}/100`;
+      if (overallScore != null) {
+        scoreEl.textContent = `Scribbit Risk Score: ${Math.round(overallScore)}/100`;
       } else {
         scoreEl.textContent = "";
       }
     }
 
     if (categoryList) {
+      // Clear previous
       while (categoryList.firstChild) {
         categoryList.removeChild(categoryList.firstChild);
       }
 
       const grouped = groupRisksByCategory(riskResult);
+      const categoryScores =
+        riskResult && typeof riskResult.categoryScores === "object"
+          ? riskResult.categoryScores
+          : {};
 
       CATEGORY_ORDER.forEach((catKey) => {
         const catRisks = grouped[catKey] || [];
-        const card = createCategoryCard(catKey, catRisks);
+        const card = createCategoryCard(catKey, catRisks, categoryScores);
         categoryList.appendChild(card);
       });
     }
@@ -579,13 +797,16 @@
   }
 
   function init() {
+    // Skip iframes; only run in top frame
     if (window.top !== window.self) return;
 
     waitForDependencies(() => {
+      // Streamed updates (SPAs, dynamic content, etc.)
       window.ScribbitMessaging.onRiskUpdated((payload) => {
         updatePanel(payload);
       });
 
+      // Initial state on first load
       window.ScribbitMessaging.requestCurrentRisk().then(
         (res) => {
           const normalized = normalizeRiskResult(

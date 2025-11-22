@@ -1,12 +1,12 @@
 /* ui/panel.css */
-/* Scribbit Fairness Scanner - On-page Panel Styles (Risk v2 + Mini Mode) */
+/* Scribbit Fairness Scanner - Panel 2.0 Styles (Category → Risk Rows → Details) */
 
 #scribbit-fairness-panel {
   position: fixed;
   right: 16px;
   bottom: 16px;
   z-index: 2147483647;
-  max-width: 360px;
+  max-width: 380px;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
   color: #0f172a;
@@ -23,12 +23,12 @@
 }
 
 #scribbit-fairness-panel.scribbit-panel-mini {
-  max-width: 190px;
+  max-width: 210px;
   padding: 6px 10px;
   max-height: none;
 }
 
-/* When in mini mode, hide body & footer, keep header compact */
+/* Mini mode: hide body & footer, keep header compact */
 
 #scribbit-fairness-panel.scribbit-panel-mini .scribbit-panel-body,
 #scribbit-fairness-panel.scribbit-panel-mini .scribbit-panel-footer {
@@ -113,15 +113,13 @@
   margin-bottom: 10px;
 }
 
+/* Category card */
+
 .scribbit-category-card {
   background: #ffffff;
   border-radius: 8px;
   padding: 8px 9px;
   border: 1px solid #e5e7eb;
-}
-
-.scribbit-category-card.scribbit-category-collapsed {
-  opacity: 0.92;
 }
 
 /* Category header */
@@ -132,7 +130,20 @@
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 6px;
-  cursor: pointer;
+}
+
+.scribbit-category-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scribbit-category-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  flex-shrink: 0;
 }
 
 .scribbit-category-name {
@@ -161,17 +172,9 @@
   color: #6b7280;
 }
 
-.scribbit-category-toggle {
-  border: none;
-  background: transparent;
+.scribbit-category-score {
   font-size: 11px;
-  cursor: pointer;
-  padding: 0;
-  color: #6b7280;
-}
-
-.scribbit-category-toggle:hover {
-  color: #0f172a;
+  color: #9ca3af;
 }
 
 /* Category bar */
@@ -191,91 +194,83 @@
   border-radius: 999px;
 }
 
-/* Category issues list */
+/* Category body */
 
-.scribbit-category-issues {
-  display: block;
+.scribbit-category-body {
   margin-top: 4px;
 }
 
-.scribbit-category-empty {
-  font-size: 12px;
-  color: #6b7280;
+.scribbit-risk-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-/* Risk item */
+/* Risk group */
 
-.scribbit-risk-item {
+.scribbit-risk-group {
   border-radius: 6px;
-  padding: 6px 6px 6px 6px;
-  margin-bottom: 4px;
   background: #f9fafb;
+  padding: 6px;
 }
 
-.scribbit-risk-title-row {
+/* Risk row (collapsed view) */
+
+.scribbit-risk-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.scribbit-risk-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  margin-top: 2px;
+}
+
+/* Green check icon for no-risk row */
+
+.scribbit-risk-icon-ok {
+  position: relative;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid #22c55e;
+}
+
+.scribbit-risk-icon-ok::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 2px;
+  justify-content: center;
+  font-size: 10px;
+  color: #16a34a;
+}
+
+/* Risk main text */
+
+.scribbit-risk-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 
 .scribbit-risk-title {
   font-weight: 500;
   font-size: 13px;
   color: #111827;
-  flex: 1;
 }
 
-.scribbit-risk-severity {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-.scribbit-risk-description {
+.scribbit-risk-summary {
   font-size: 12px;
   color: #4b5563;
-  margin-bottom: 4px;
 }
 
-/* Evidence */
+/* Risk toggle button */
 
-.scribbit-risk-evidence-container {
-  margin-top: 4px;
-}
-
-.scribbit-risk-evidence-toggle {
-  border: none;
-  background: transparent;
-  font-size: 11px;
-  color: #0ea5e9;
-  cursor: pointer;
-  padding: 0;
-}
-
-.scribbit-risk-evidence-toggle:hover {
-  text-decoration: underline;
-}
-
-.scribbit-risk-evidence {
-  margin: 4px 0 0;
-  padding-left: 16px;
-  font-size: 11px;
-  color: #374151;
-  max-height: 80px;
-  overflow-y: auto;
-}
-
-.scribbit-risk-evidence li {
-  margin-bottom: 2px;
-}
-
-/* "Why is this risky?" */
-
-.scribbit-risk-why {
+.scribbit-risk-toggle {
   border: none;
   background: transparent;
   font-size: 11px;
@@ -286,8 +281,70 @@
   white-space: nowrap;
 }
 
-.scribbit-risk-why:hover {
+.scribbit-risk-toggle:hover {
   text-decoration: underline;
+}
+
+/* No-risk row styling */
+
+.scribbit-risk-row.scribbit-no-risks {
+  background: transparent;
+  padding: 0;
+}
+
+/* Risk details (expanded view) */
+
+.scribbit-risk-details {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.scribbit-risk-why-matters {
+  font-size: 12px;
+  color: #111827;
+  margin-bottom: 4px;
+}
+
+/* Evidence list */
+
+.scribbit-risk-evidence-list {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 11px;
+  color: #374151;
+  max-height: 90px;
+  overflow-y: auto;
+}
+
+.scribbit-risk-evidence-list li {
+  margin-bottom: 2px;
+}
+
+/* Fee breakdown */
+
+.scribbit-risk-fee-breakdown {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px dashed #e5e7eb;
+}
+
+.scribbit-risk-fee-title {
+  font-size: 11px;
+  font-weight: 500;
+  color: #111827;
+  margin-bottom: 2px;
+}
+
+.scribbit-risk-fee-list {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11px;
+  color: #374151;
+}
+
+.scribbit-risk-fee-list li {
+  margin-bottom: 2px;
 }
 
 /* Footer */
@@ -311,7 +368,7 @@
   color: #6b7280;
 }
 
-/* Severity colors */
+/* Severity colors (shared tokens) */
 
 .scribbit-severity-high {
   background: rgba(239, 68, 68, 0.1);
@@ -337,15 +394,37 @@
   color: #475569;
 }
 
+/* Apply severity colors to category bar & icons */
+
+.scribbit-category-bar-inner.scribbit-severity-high,
+.scribbit-risk-icon.scribbit-severity-high {
+  background: rgba(239, 68, 68, 0.9);
+}
+
+.scribbit-category-bar-inner.scribbit-severity-medium,
+.scribbit-risk-icon.scribbit-severity-medium {
+  background: rgba(249, 115, 22, 0.9);
+}
+
+.scribbit-category-bar-inner.scribbit-severity-low,
+.scribbit-risk-icon.scribbit-severity-low {
+  background: rgba(34, 197, 94, 0.9);
+}
+
+.scribbit-category-bar-inner.scribbit-severity-none,
+.scribbit-risk-icon.scribbit-severity-none {
+  background: rgba(148, 163, 184, 0.75);
+}
+
 /* Scrollbar subtle styling inside panel body/evidence */
 
 .scribbit-panel-body::-webkit-scrollbar,
-.scribbit-risk-evidence::-webkit-scrollbar {
+.scribbit-risk-evidence-list::-webkit-scrollbar {
   width: 6px;
 }
 
 .scribbit-panel-body::-webkit-scrollbar-thumb,
-.scribbit-risk-evidence::-webkit-scrollbar-thumb {
+.scribbit-risk-evidence-list::-webkit-scrollbar-thumb {
   background: rgba(148, 163, 184, 0.7);
   border-radius: 999px;
 }
